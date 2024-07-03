@@ -215,11 +215,6 @@ class GltfIO(AbstractTrimeshIO):
     extensions = ('.gltf', '.glb')
 
 
-class XyzIO(AbstractTrimeshIO):
-    name = 'XYZ'
-    extensions = ('.xyz',)
-
-
 class Stl3D(AbstractTrimeshIO):
     name = 'stl'
     extensions = ('.stl',)
@@ -271,7 +266,7 @@ class FreesurferIO(IOProtocol):
         Returns:
             Mesh: The loaded mesh.
         """
-        smesh = self.surfa.load_mesh(filename)
+        smesh = self.surfa.load_mesh(filename).convert(space='world')
         return vx.Mesh(torch.as_tensor(smesh.vertices), torch.as_tensor(smesh.faces))
 
     def save(self, mesh: vx.Mesh, filename: os.PathLike) -> None:
@@ -292,7 +287,6 @@ mesh_io_protocols = [
     WavefrontIO,
     StanfordPolygonIO,
     GltfIO,
-    XyzIO,
     Stl3D,
     ThreeDxmlIO,
     ThreeMfIO,

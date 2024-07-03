@@ -111,7 +111,8 @@ class Volume:
             geometry (AcquisitionGeometry, optional): The new geometry. If None,
                 the current geometry will be propagated.
         """
-        return self.__class__(tensor, geometry or self.geometry)
+        geometry = self.geometry if geometry is None else geometry
+        return self.__class__(tensor, geometry)
 
     def save(self, filename: os.PathLike, fmt: str = None) -> None:
         """
@@ -136,6 +137,20 @@ class Volume:
             Volume: A new volume instance with the detached tensor.
         """
         return self.new(self.tensor.detach())
+
+    def to(self, device: torch.Device) -> Volume:
+        """
+        Move the volume tensor to a device.
+
+        Args:
+            device: A torch device.
+
+        Returns:
+            Volume: A new volume instance.
+        """
+        if device is None:
+            return self
+        return self.new(self.tensor.to(device))
 
     def cuda(self) -> Volume:
         """
@@ -240,6 +255,33 @@ class Volume:
             Volume: A new ceiled volume instance.
         """
         return self.new(self.tensor.ceil())
+
+    def abs(self) -> Volume:
+        """
+        Compute absolute values of the volume features.
+
+        Returns:
+            Volume: A new volume instance.
+        """
+        return self.new(self.tensor.abs())
+
+    def exp(self) -> Volume:
+        """
+        Compute exponential of the elements in the volume features.
+
+        Returns:
+            Volume: A new exponentiated volume instance.
+        """
+        return self.new(self.tensor.exp())
+
+    def isnan(self) -> Volume:
+        """
+        Compute a mask of NaN values in the volume.
+
+        Returns:
+            Volume: A new volume mask instance.
+        """
+        return self.new(self.tensor.isnan())
 
     def clamp(self,
         min: float = None,
@@ -501,12 +543,12 @@ class Volume:
             nonzero = tensor.view(self.baseshape).nonzero()
             if nonzero.shape[0] == 0:
                 raise ValueError('cannot compute nonzero bounds on an empty volume')
-            min_point = nonzero.amin(dim=0)
-            max_point = nonzero.amax(dim=0)
+            min_point = nonzero.amin(dim=0).float()
+            max_point = nonzero.amax(dim=0).float()
         else:
             # just use the bounds of the volume extent
             min_point = torch.zeros(3, device=self.device)
-            max_point = torch.tensor(self.baseshape, device=self.device) - 1
+            max_point = torch.tensor(self.baseshape, device=self.device).float() - 1
         
         # expand (or shrink) margin around border
         if margin is not None:
@@ -539,7 +581,7 @@ class Volume:
 
         if vx.Space(space) == 'world':
             centroids = self.matrix.transform(centroids)
-    
+
         return centroids
 
     def crop(self, cropping: tuple | vx.Mesh, margin: float | torch.Tensor = None) -> Volume:
@@ -597,7 +639,6 @@ class Volume:
                 minc = (minc - margin).clamp(min=0)
                 maxc = (maxc + margin).clamp(max=torch.tensor(self.baseshape))
                 slicing = (slicing[0], *vx.slicing.coordinates_to_slicing(minc, maxc, stride))
-
         else:
             raise ValueError('unknown cropping item')
         
@@ -695,7 +736,8 @@ class Volume:
         # if we got here, it means have to resort to doing a grid interpolation, so first
         # build the coordinate grid for the target image
         transform = self.geometry.inverse() @ target
-        grid = volume_grid(target.baseshape, transform=transform, device=self.device, normalize=True)
+        grid = volume_grid(target.baseshape, transform=transform,
+                           device=self.device, normalize=self.baseshape)
 
         resampled = torch.nn.functional.grid_sample(
                         input=self.tensor.float().unsqueeze(0),
@@ -709,26 +751,6 @@ class Volume:
             resampled = resampled.type(self.dtype)
 
         return self.new(resampled, target)
-
-    def reshape(self, baseshape: torch.Size) -> Volume:
-        """
-        Modify the spatial extent of the volume, cropping or padding around the
-        center image to fit a given **baseshape**.
-
-        This method is symmetric in that performing a reverse reshape operation
-        will always yeild the original geometry.
-
-        args:
-            baseshape (torch.Size): Target spatial (3D) shape.
-        
-        returns:
-            Volume: Reshaped volume instance.
-        """
-        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
-        target = vx.AcquisitionGeometry(baseshape=baseshape,
-                                        matrix=self.geometry.shift(shift, space='voxel'),
-                                        slice_direction=self.geometry._explicit_slice_direction)
-        return self.resample_like(target, mode='nearest')
 
     def resample(self, spacing: float | torch.Tensor, mode: str = 'linear') -> Volume:
         """
@@ -751,15 +773,35 @@ class Volume:
 
         # compute new shapes and lengths of the new grid (we'll round up here to avoid losing any data)
         curshape = torch.tensor(self.baseshape, dtype=torch.float32)
-        newshape = (self.spacing * curshape / spacing).ceil().int()
+        newshape = (self.geometry.spacing * curshape / spacing).ceil().int()
 
         # determine the new geometry
-        scale = spacing / self.spacing
+        scale = spacing / self.geometry.spacing
         shift = 0.5 * scale * (1 - newshape / curshape)
-        matrix = self.matrix.shift(shift).scale(scale)
+        matrix = self.geometry.shift(shift, space='voxel').scale(scale, space='voxel')
         target = vx.AcquisitionGeometry(newshape, matrix)
 
         return self.resample_like(target, mode=mode)
+
+    def reshape(self, baseshape: torch.Size) -> Volume:
+        """
+        Modify the spatial extent of the volume, cropping or padding around the
+        center image to fit a given **baseshape**.
+
+        This method is symmetric in that performing a reverse reshape operation
+        will always yeild the original geometry.
+
+        args:
+            baseshape (torch.Size): Target spatial (3D) shape.
+        
+        returns:
+            Volume: Reshaped volume instance.
+        """
+        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
+        target = vx.AcquisitionGeometry(baseshape=baseshape,
+                                        matrix=self.geometry.shift(shift, space='voxel'),
+                                        slice_direction=self.geometry._explicit_slice_direction)
+        return self.resample_like(target, mode='nearest')
 
     def transform(self,
         transform: vx.AffineVolumeTransform | vx.AffineMatrix,
@@ -797,22 +839,22 @@ class Volume:
 
         # if we're resampling, convert to a voxel-to-voxel transform
         target = transform.target
-        transform = transform.convert(space='voxel', source=self).inverse()
+        inverted = transform.convert(space='voxel', source=self).inverse()
 
         # construct the transformed resampling grid
-        grid = volume_grid(transform.target.baseshape, transform=transform,
-                           device=self.device, normalize=True)
-    
+        grid = volume_grid(target.baseshape, transform=inverted,
+                           device=self.device, normalize=self.baseshape)
+
         interpolated = torch.nn.functional.grid_sample(
                         self.tensor.unsqueeze(0).float(),
                         grid.unsqueeze(0),
                         mode=('bilinear' if mode == 'linear' else mode),
                         padding_mode='zeros',
                         align_corners=True).squeeze(0)
-        
+
         if negate:
             # apply inverse transform to the geometry to cancel out world space changes
-            target = transform.convert(space='world') @ target
+            target = inverted.convert(space='world') @ target
 
         return self.new(interpolated, target)
 
@@ -846,7 +888,7 @@ def _cast_volume_as_tensor(other: object) -> object:
 def volume_grid(
     baseshape: torch.Size,
     transform: vx.AffineMatrix | None = None,
-    normalize: bool = True,
+    normalize: torch.Size | None = None,
     device: torch.device | None = None) -> torch.Tensor:
     """
     Construct a grid of 3D voxel coordinates of the shape (W, H, D, 3).
@@ -854,9 +896,9 @@ def volume_grid(
     Args:
         baseshape (torch.Size): Spatial (3D) shape of the volume grid.
         transform (AffineMatrix, optional): Grid coordinate transform.
-        normalize (bool, optional): If True, the grid is normalized
-            between [1, -1] and the coordinate order is swapped (for
-            use with torch sampling methods).
+        normalize (torch.Size, optional): If True, the grid is normalized
+            between [1, -1] using the provided spatial shape and the
+            coordinate order is swapped (for torch sampling methods).
         device (torch.device | None, optional): Device on which to
             allocate the grid data.
 
@@ -867,8 +909,8 @@ def volume_grid(
     grid = torch.stack(torch.meshgrid(*ranges, indexing='ij'), dim=-1)
     if transform:
         grid = transform.transform(grid)
-    if normalize:
-        grid = normalize_grid_points(baseshape, grid).flip(-1)
+    if normalize is not None:
+        grid = normalize_grid_points(normalize, grid).flip(-1)
     return grid
 
 
