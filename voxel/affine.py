@@ -98,7 +98,7 @@ class AffineMatrix:
         coords_homogeneous = torch.cat((coords_reshaped, ones), dim=1)
 
         # apply the transformation, convert back to cartesian, and reshape
-        transformed_coords = coords_homogeneous @ self.tensor.T
+        transformed_coords = coords_homogeneous @ self.tensor.T.to(coords.device)
         return transformed_coords[:, :3].view(coords.shape)
 
 
