@@ -421,11 +421,11 @@ class Volume:
         # a regular boolean tensor-based indexing should be treated the
         # same as it would for a normal tensor
         if isinstance(indexing, torch.Tensor):
-            self.tensor[indexing]
+            return self.tensor[indexing]
         # the same goes for volume indexing (in which we'll just use the
         # underlying tensor)
         elif isinstance(indexing, Volume):
-            self.tensor[indexing.tensor]
+            return self.tensor[indexing.tensor]
         # in all circumstances (ex: slicing tuple or bounding box), call
         # the crop function which actually returns a new volume
         return self.crop(indexing)
@@ -640,7 +640,7 @@ class Volume:
                 maxc = (maxc + margin).clamp(max=torch.tensor(self.baseshape))
                 slicing = (slicing[0], *vx.slicing.coordinates_to_slicing(minc, maxc, stride))
         else:
-            raise ValueError('unknown cropping item')
+            raise ValueError(f'unknown cropping item: {type(cropping)}')
         
         # update the geometry based on any inferred voxel shift or scale
         geometry = self.geometry
