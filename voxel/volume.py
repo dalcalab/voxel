@@ -317,7 +317,7 @@ class Volume:
         Returns:
             Volume: A new volume instance filled with zeros.
         """
-        shape = self.shape if channels is None else (self.num_channels, *self.baseshape)
+        shape = self.shape if channels is None else (channels, *self.baseshape)
         dtype = dtype or self.dtype
         return self.new(torch.zeros(shape, dtype=dtype, device=self.device))
 
@@ -335,7 +335,7 @@ class Volume:
         Returns:
             Volume: A new volume instance filled with ones.
         """
-        shape = self.shape if channels is None else (self.num_channels, *self.baseshape)
+        shape = self.shape if channels is None else (channels, *self.baseshape)
         dtype = dtype or self.dtype
         return self.new(torch.ones(shape, dtype=dtype, device=self.device))
 
@@ -355,9 +355,47 @@ class Volume:
         Returns:
             Volume: A new filled volume instance.
         """
-        shape = self.shape if channels is None else (self.num_channels, *self.baseshape)
+        shape = self.shape if channels is None else (channels, *self.baseshape)
         dtype = dtype or self.dtype
         return self.new(torch.full(shape, fill, dtype=dtype, device=self.device))
+
+    def rand_like(self,
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
+        """
+        Create a volume of random values with the same geometry and
+        device as the current instance. Values are sampled from a uniform
+        distribution on the interval [0, 1).
+
+        Args:
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new random volume instance.
+        """
+        shape = self.shape if channels is None else (channels, *self.baseshape)
+        dtype = dtype or self.dtype
+        return self.new(torch.rand(shape, dtype=dtype, device=self.device))
+
+    def randn_like(self,
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
+        """
+        Create a volume of random values with the same geometry and
+        device as the current instance. Values are sampled from a normal
+        distribution with mean 0 and variance 1
+
+        Args:
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new random volume instance.
+        """
+        shape = self.shape if channels is None else (channels, *self.baseshape)
+        dtype = dtype or self.dtype
+        return self.new(torch.randn(shape, dtype=dtype, device=self.device))
 
     def isin(self, elements: torch.Tensor) -> Volume:
         """
