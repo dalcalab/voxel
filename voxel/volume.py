@@ -220,23 +220,53 @@ class Volume:
         """
         return self.new(self.tensor.bool())
 
-    def max(self) -> torch.Tensor:
+    def max(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Get the maximum value in the volume tensor.
 
-        Returns:
-            torch.Tensor: The maximum value.
-        """
-        return self.tensor.max()
+                Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
 
-    def min(self) -> torch.Tensor:
+        Returns:
+            Tensor or Volume: The maximum value or volume.
+        """
+        reduced = self.tensor.amax(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
+
+    def min(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Get the minimum value in the volume features.
 
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
+
         Returns:
-            torch.Tensor: The minimum value.
+            Tensor or Volume: The mininum value or volume.
         """
-        return self.tensor.min()
+        reduced = self.tensor.amin(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
+
+    def sum(self, dim: int | None = None) -> Volume | torch.Tensor:
+        """
+        Compute the sum of all voxels.
+
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
+
+        Returns:
+            Tensor or Volume: The sum value or volume.
+        """
+        reduced = self.tensor.sum(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
 
     def floor(self) -> Volume:
         """
@@ -302,6 +332,30 @@ class Volume:
             self.tensor.clamp_(min=min, max=max)
         else:
             return self.new(self.tensor.clamp(min=min, max=max))
+
+    def maximum(self, other: Volume) -> Volume:
+        """
+        Computes the element-wise maximum between two volumes.
+
+        Args:
+            other (Volume): The input volume to compare against.
+
+        Returns:
+            Volume: A maximized volume instance.
+        """
+        return self.new(self.tensor.maximum(other.tensor))
+
+    def minimum(self, other: Volume) -> Volume:
+        """
+        Computes the element-wise minimum between two volumes.
+
+        Args:
+            other (Volume): The input volume to compare against.
+
+        Returns:
+            Volume: A minimized volume instance.
+        """
+        return self.new(self.tensor.minimum(other.tensor))
 
     def zeros_like(self,
         channels: int | None = None,
@@ -460,10 +514,15 @@ class Volume:
         # same as it would for a normal tensor
         if isinstance(indexing, torch.Tensor):
             return self.tensor[indexing]
-        # the same goes for volume indexing (in which we'll just use the
-        # underlying tensor)
+        # the same goes for boolean volume indexing (in which case we'll
+        # just use the underlying tensor)
         elif isinstance(indexing, Volume):
-            return self.tensor[indexing.tensor]
+            indexing = indexing.tensor
+            # if we get a one-channel boolean mask for the indexing,
+            # we should auto-broadcast it to match the target channels
+            if indexing.shape[0] == 1 and self.num_channels > 1:
+                indexing = indexing.expand(self.num_channels, -1, -1, -1)
+            return self.tensor[indexing]
         # in all circumstances (ex: slicing tuple or bounding box), call
         # the crop function which actually returns a new volume
         return self.crop(indexing)
@@ -663,7 +722,12 @@ class Volume:
             # convert coordinate bounds to a 4D slicing tuple
             slicing = (slice(None), *vx.slicing.coordinates_to_slicing(minc, maxc))
 
-        elif isinstance(cropping, tuple):
+        elif isinstance(cropping, (tuple, int, slice, type(...))):
+
+            # conform single indexing items to a tuple format
+            if not isinstance(cropping, tuple):
+                cropping = (cropping,)
+
             # if we get a tuple assume its a tuple of slices
             slicing = vx.slicing.expand_slicing(cropping, 4)
 
@@ -967,3 +1031,21 @@ def normalize_grid_points(baseshape: torch.Size, points: torch.Tensor) -> torch.
         Tensor: Normalized coordinates matching the input shape.
     """
     return points / (torch.tensor(baseshape, device=points.device) - 1) * 2 - 1
+
+
+def stack(*vols):
+    """
+    Concatenates (stacks) multiple volumes channel-wise. Assumes
+    volumes are in the same image space (with the same base shape).
+
+    Args:
+        *vols (sequence of Volumes): Volumes to merge.
+
+    Returns:
+        Volume: Single channel-stacked volume instance.
+    """
+    if len(vols) == 1 and not isinstance(vols[0], Volume):
+        vols = vols[0]
+    if len(vols) == 1:
+        return vols[0]
+    return vols[0].new(torch.cat([v.tensor for v in vols], dim=0))
