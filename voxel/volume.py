@@ -854,7 +854,10 @@ class Volume:
 
         return self.new(resampled, target)
 
-    def resample(self, spacing: float | torch.Tensor, mode: str = 'linear') -> Volume:
+    def resample(self,
+        spacing: float | torch.Tensor,
+        mode: str = 'linear',
+        padding_mode: str = 'zeros') -> Volume:
         """
         Resample voxel features to a new voxel grid spacing.
 
@@ -862,6 +865,7 @@ class Volume:
             spacing (float |Tensor): Target voxel spacing. An isotropic target
                 is assumed if a scalar is provided.
             mode (str, optional): Interpolation mode.
+            padding_mode (str, optional): Padding mode for outside grid values.
 
         Returns:
             Volume: Volume resampled to the target voxel spacing.
@@ -883,7 +887,7 @@ class Volume:
         matrix = self.geometry.shift(shift, space='voxel').scale(scale, space='voxel')
         target = vx.AcquisitionGeometry(newshape, matrix)
 
-        return self.resample_like(target, mode=mode)
+        return self.resample_like(target, mode=mode, padding_mode=padding_mode)
 
     def reshape(self, baseshape: torch.Size) -> Volume:
         """
@@ -901,6 +905,26 @@ class Volume:
         """
         shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
         target = vx.AcquisitionGeometry(baseshape=baseshape,
+                                        matrix=self.geometry.shift(shift, space='voxel'),
+                                        slice_direction=self.geometry._explicit_slice_direction)
+        return self.resample_like(target, mode='nearest')
+
+    def pad(self, delta: torch.Tensor) -> Volume:
+        """
+        Pad the spatial extent of the volume by a given delta. Note that
+        a negative delta value will result in cropping.
+
+        args:
+            delta (float or Tensor, optional): 3D delta (in world units) to
+                pad (or crop) the spatial extent in each direction.
+
+        returns:
+            Volume: Reshaped volume instance.
+        """
+        curr_shape = torch.tensor(self.baseshape)
+        new_shape = curr_shape + (delta / self.geometry.spacing).round().int()
+        shift = (curr_shape - new_shape) // 2
+        target = vx.AcquisitionGeometry(baseshape=new_shape,
                                         matrix=self.geometry.shift(shift, space='voxel'),
                                         slice_direction=self.geometry._explicit_slice_direction)
         return self.resample_like(target, mode='nearest')
