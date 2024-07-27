@@ -1000,7 +1000,7 @@ class Volume:
         Returns:
             Volume: Smoothed volume.
         """
-        scaled = torch.as_tensor(sigma, device=self.device) / self.geometry.spacing
+        scaled = torch.as_tensor(sigma, device=self.device) / self.geometry.spacing.to(self.device)
         return self.new(vx.filters.gaussian_blur(self.tensor, scaled, truncate=truncate))
 
 
