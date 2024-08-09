@@ -171,6 +171,42 @@ class StanfordPolygonIO(IOProtocol):
         tmesh.export(filename, include_attributes=True)
 
 
+class TorchMeshIO(IOProtocol):
+    """
+    Mesh IO protocol for pytorch format.
+    """
+
+    name = 'pth'
+    extensions = ('.pth', '.pt')
+
+    def load(self, filename: os.PathLike) -> vx.Mesh:
+        """
+        Read mesh from a file.
+
+        Args:
+            filename (PathLike): The path to the file to read.
+
+        Returns:
+            Mesh: The loaded mesh.
+        """
+        items = torch.load(filename)
+        if 'v' not in items or 'f' not in items:
+            raise RuntimeError(f'could not find `v` or `f` data keys in {filename}')
+        return vx.Mesh(items['v'], items['f'])
+
+    def save(self, mesh: vx.Mesh, filename: os.PathLike) -> None:
+        """
+        Write mesh to a file.
+
+        Args:
+            mesh (Mesh): The mesh to save.
+            filename (PathLike): Output path.
+        """
+        vertices = mesh.vertices.detach().cpu()
+        faces = mesh.faces.detach().cpu()
+        torch.save({'v': vertices, 'f': faces}, filename)
+
+
 class AbstractTrimeshIO(IOProtocol):
     """
     Mesh IO protocol for the Polygon File Format, a.k.a. Stanford PLY.
@@ -286,6 +322,7 @@ class FreesurferIO(IOProtocol):
 mesh_io_protocols = [
     WavefrontIO,
     StanfordPolygonIO,
+    TorchMeshIO,
     GltfIO,
     Stl3D,
     ThreeDxmlIO,
