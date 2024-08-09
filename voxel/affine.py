@@ -212,3 +212,32 @@ class AffineVolumeTransform(AffineMatrix):
                 affine = target.inverse() @ affine @ source
 
         return AffineVolumeTransform(affine, space, source, target)
+
+
+def angles_to_rotation_matrix(
+    rotation: torch.Tensor,
+    degrees: bool = True) -> AffineMatrix:
+    """
+    Compute a 3D rotation matrix from rotation angles.
+
+    Args:
+        rotation (Tensor): Rotation angles. If `degrees` is True, the
+            angles are in degrees, otherwise they are in radians.
+        degrees (bool, optional): Whether the angles are defined as degrees or,
+            alternatively, as radians.
+
+    Returns:
+        AffineMatrix: Rotation affine matrix.
+    """
+    if degrees:
+        rotation = torch.deg2rad(rotation)
+
+    c, s = torch.cos(rotation[0]), torch.sin(rotation[0])
+    rx = torch.tensor([[1, 0, 0], [0, c, s], [0, -s, c]], dtype=torch.float64)
+    c, s = torch.cos(rotation[1]), torch.sin(rotation[1])
+    ry = torch.tensor([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=torch.float64)
+    c, s = torch.cos(rotation[2]), torch.sin(rotation[2])
+    rz = torch.tensor([[c, s, 0], [-s, c, 0], [0, 0, 1]], dtype=torch.float64)
+    matrix = rx @ ry @ rz
+
+    return AffineMatrix(matrix.to(rotation.device))
