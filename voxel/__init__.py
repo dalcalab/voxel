@@ -13,6 +13,9 @@ from .affine import AffineVolumeTransform
 
 from . import acquisition
 from .acquisition import AcquisitionGeometry
+from .acquisition import Orientation
+from .acquisition import cast_orientation
+from .acquisition import cast_acquisition_geometry
 
 from . import volume
 from .volume import Volume

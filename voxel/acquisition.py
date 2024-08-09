@@ -98,6 +98,12 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self.spacing[self.in_plane_directions]
 
+    @vx.caching.cached
+    def orientation(self) -> Orientation:
+        """
+        """
+        return Orientation(self)
+
     def is_isotropic(self, rtol: float = 1e-2) -> bool:
         """
         Determine if voxel spacing is isotropic within a relative tolerance.
@@ -116,7 +122,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Shift, or translate, the acquisition geometry.
 
         Args:
-            delta (float or torch.Tensor): The shift amount.
+            delta (float or Tensor): The shift amount.
             space (Space): The space in which to apply the shift.
 
         Returns:
@@ -148,6 +154,106 @@ class AcquisitionGeometry(vx.AffineMatrix):
                                        slice_direction=self._explicit_slice_direction)
         return geometry
 
+    def rotate(self,
+        rotation: torch.Tensor,
+        space: vx.Space,
+        degrees: bool = True) -> AcquisitionGeometry:
+        """
+        Rotate the acquisition geometry.
+
+        Args:
+            rotation (Tensor): Rotation angles (x, y, z). If `degrees` is True, the
+                angles are in degrees, otherwise they are in radians.
+            space (Space): The space in which to apply the rotation.
+            degrees (bool, optional): Whether the angles are defined as degrees or,
+                alternatively, as radians.
+
+        Returns:
+            AcquisitionGeometry: The rotated geometry.
+        """
+        rotation = torch.as_tensor(rotation, device=self.device)
+        trf = vx.affine.angles_to_rotation_matrix(rotation, degrees=degrees)
+        matrix = trf @ self if vx.Space(space) =='world' else self @ trf
+        geometry = AcquisitionGeometry(self.baseshape, matrix,
+                                       slice_direction=self._explicit_slice_direction)
+        return geometry
+
+    def reorient(self, target):
+        """
+        """
+        source = self.orientation
+        target = cast_orientation(target)
+
+        perm = source.dims[target.dims]
+        flip = source.flip * target.flip[perm.argsort()]
+
+        baseshape = torch.tensor(self.baseshape)
+
+        trf = vx.AffineMatrix(torch.diag(flip)[:, perm])
+        trf[:3, -1] = (baseshape - 1) * (flip < 0)
+
+        slice_direction = None
+        if self._explicit_slice_direction is not None:
+            slice_direction = perm.argsort()[self.slice_direction]
+
+        return AcquisitionGeometry(baseshape[perm], self @ trf, slice_direction=slice_direction)
+
+    def bounds(self, margin: float | torch.Tensor = None) -> vx.Mesh:
+        """
+        Compute a box mesh enclosing the bounds of the grid.
+
+        Args:
+            margin (float or Tensor, optional): Margin (in world units) to expand
+                the cropping boundary. Can be a positive or negative delta.
+
+        Returns:
+            Mesh: Bounding box mesh in world-space coordinates.
+        """
+        minc = torch.zeros(3, device=self.device)
+        maxc = torch.tensor(self.baseshape, device=self.device).float() - 1
+        
+        # expand (or shrink) margin around border
+        if margin is not None:
+            margin = (margin / self.spacing).round().int().view(-1, 3).expand(2, 3)
+            minc -= margin[0]
+            maxc += margin[1]
+
+        # build the world-space bounding box mesh
+        mesh = vx.mesh.construct_box_mesh(minc, maxc)
+        return mesh.transform(self.geometry)
+
+    def fit_to_bounds(self,
+        bounds: vx.Mesh,
+        margin: float | torch.Tensor = None) -> AcquisitionGeometry:
+        """
+        """
+        points = self.inverse().transform(bounds.vertices.detach())
+        minc = points.amin(0).floor().int()
+        maxc = points.amax(0).ceil().int() + 1
+
+        if margin is not None:
+            margin = (margin / self.spacing).round().int().view(-1, 3).expand(2, 3)
+            minc -= margin[0]
+            maxc += margin[1]
+
+        geometry = AcquisitionGeometry(maxc - minc, self.shift(minc, 'voxel'),
+                                       slice_direction=self._explicit_slice_direction)
+        return geometry
+
+    def voxel_to_local(self) -> vx.AffineMatrix:
+        """
+        Transform that converts voxel coordiates to flipped local grid coordinates in
+        the range [-1, 1]. These local coordinates are used for grid sampling in torch.
+
+        Returns:
+            AffineMatrix: Transformed local coordinates.
+        """
+        mat = torch.eye(4)
+        mat[:3, :3] *= 2 / (torch.tensor(self.baseshape) - 1)
+        mat[:3, -1] = -1
+        mat[[0, 2]] = mat[[2, 0]]
+        return vx.AffineMatrix(mat)
+
 
 def cast_acquisition_geometry(obj: vx.Volume | AcquisitionGeometry) -> AcquisitionGeometry:
     """
@@ -165,3 +271,47 @@ def cast_acquisition_geometry(obj: vx.Volume | AcquisitionGeometry) -> Acquisiti
         return obj
     else:
         raise ValueError(f'cannot cast {type(obj)} to AcquisitionGeometry')
+
+
+class Orientation:
+
+    def __init__(self, item) -> None:
+
+        self.axes = 'LRPAIS'
+
+        if isinstance(item, str):
+            try:
+                indices = [self.axes.index(x) for x in item]
+            except:
+                raise ValueError(f'orientation string must contain one of {self.axes}')
+            self.dims = torch.as_tensor([0, 0, 1, 1, 2, 2])[indices]
+            self.flip = torch.as_tensor([-1, 1, -1, 1, -1, 1])[indices]
+
+        elif isinstance(item, vx.AffineMatrix):
+            tensor = item[:3, :3]
+            self.dims = tensor.abs().argmax(1)
+            self.flip = tensor[tensor.abs().argmax(0), [0, 1, 2]].sign().int()
+
+        else:
+            return ValueError(f'cannot initialize Orientation from {type(item)}')
+
+    def name(self) -> str:
+        """
+        """
+        indices = self.dims * 2 + (self.flip > 0)
+        return ''.join([self.axes[i] for i in indices])
+
+
+def cast_orientation(obj) -> Orientation:
+    """
+    Cast item to an Orientation
+
+    Args:
+        obj (any): Object to cast.
+    
+    Returns:
+        Orientation
+    """
+    if isinstance(obj, Orientation):
+        return obj
+    return Orientation(obj)
