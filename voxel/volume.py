@@ -103,7 +103,7 @@ class Volume:
         tensor: torch.Tensor,
         geometry: vx.AcquisitionGeometry | None = None) -> Volume:
         """
-        Construct a new volume instance with the specified features tensor, while
+        Construct a new volume instance with the provided features tensor, while
         preserving any unchanged properties of the original volume.
 
         Args:
@@ -503,6 +503,11 @@ class Volume:
             k = int(flattened.numel() * q) + 1
             return flattened.topk(k, largest=False, sorted=False).values.max()
 
+    def sigmoid(self):
+        """
+        """
+        return self.new(self.tensor.sigmoid())
+
     # -------------------------------------------------------------------------
     # indexing / operator overloads for tensor-style voxel data manipulation
     # -------------------------------------------------------------------------
@@ -617,6 +622,36 @@ class Volume:
     # -------------------------------------------------------------------------
     # methods for manipulating spatial geometry and computing coordinates
     # -------------------------------------------------------------------------
+
+    def tesselate(self, threshold: float = 0.5, space: vx.Space = 'world') -> vx.Mesh:
+        """
+        Tesselate a mesh around connected voxel components.
+        This is not differentiable.
+
+        Args:
+            threshold (float, optional): Scalar threshold that determines
+                whether a voxel is inside or outside the mesh boundary.
+            space (Space, optional): The coordinate space of mesh vertices.
+
+        Returns:
+            Mesh: Tesselated mesh.
+        """
+        try:
+            from pytorch3d.ops.marching_cubes import marching_cubes
+        except ImportError as exc:
+            raise ImportError('mesh tesselation requires that the '
+                              'pytorch3d package is installed') from exc
+
+        # 
+        padded = self.detach().pad(self.geometry.spacing)
+        vertices, faces = marching_cubes(padded.tensor.float(), threshold,
+                                         return_local_coords=False)
+        mesh = vx.Mesh(vertices[0].flip(-1) - 1, faces[0])
+
+        # 
+        if vx.Space(space) == 'world':
+            mesh = mesh.transform(self.geometry)
+        return mesh
 
     def bounds(self,
         nonzero: bool = False,
@@ -777,6 +812,27 @@ class Volume:
         maxc = nonzero.amax(0)
         return self.crop(vx.slicing.coordinates_to_slicing(minc, maxc), margin=margin)
 
+    def reorient(self, orientation: vx.Orientation) -> Volume:
+        """
+        """
+        source = self.geometry.orientation
+        target = vx.cast_orientation(orientation)
+
+        # 
+        perm = source.dims[target.dims]
+        tensor = self.tensor
+        if (perm != torch.tensor((0, 1, 2))).any():
+            tensor = tensor.permute(0, *(perm + 1))
+
+        # 
+        flip = source.flip[perm] * target.flip
+        indices = (flip < 0).argwhere()
+        if len(indices) > 0:
+            tensor = tensor.flip(*(indices + 1))
+
+        # 
+        return self.new(tensor, self.geometry.reorient(orientation))
+
     def resample_like(self,
         target: Volume | vx.AcquisitionGeometry,
         mode: str = 'linear',
@@ -839,7 +895,7 @@ class Volume:
         # build the coordinate grid for the target image
         transform = self.geometry.inverse() @ target
         grid = volume_grid(target.baseshape, transform=transform,
-                           device=self.device, normalize=self.baseshape)
+                           device=self.device, localshape=self.baseshape)
 
         resampled = torch.nn.functional.grid_sample(
                         input=self.tensor.float().unsqueeze(0),
@@ -922,7 +978,7 @@ class Volume:
             Volume: Reshaped volume instance.
         """
         curr_shape = torch.tensor(self.baseshape)
-        new_shape = curr_shape + (delta / self.geometry.spacing).round().int()
+        new_shape = curr_shape + (2 * delta / self.geometry.spacing).round().int()
         shift = (curr_shape - new_shape) // 2
         target = vx.AcquisitionGeometry(baseshape=new_shape,
                                         matrix=self.geometry.shift(shift, space='voxel'),
@@ -969,7 +1025,7 @@ class Volume:
 
         # construct the transformed resampling grid
         grid = volume_grid(target.baseshape, transform=inverted,
-                           device=self.device, normalize=self.baseshape)
+                           device=self.device, localshape=self.baseshape)
 
         interpolated = torch.nn.functional.grid_sample(
                         self.tensor.unsqueeze(0).float(),
@@ -1014,47 +1070,30 @@ def _cast_volume_as_tensor(other: object) -> object:
 def volume_grid(
     baseshape: torch.Size,
     transform: vx.AffineMatrix | None = None,
-    normalize: torch.Size | None = None,
+    localshape: torch.Size | None = None,
     device: torch.device | None = None) -> torch.Tensor:
     """
     Construct a grid of 3D voxel coordinates of the shape (W, H, D, 3).
 
     Args:
-        baseshape (torch.Size): Spatial (3D) shape of the volume grid.
+        baseshape (Size): Spatial (3D) shape of the volume grid.
         transform (AffineMatrix, optional): Grid coordinate transform.
-        normalize (torch.Size, optional): If True, the grid is normalized
+        localshape (Size, optional): If True, the grid is normalized
             between [1, -1] using the provided spatial shape and the
             coordinate order is swapped (for torch sampling methods).
         device (torch.device | None, optional): Device on which to
             allocate the grid data.
 
     Returns:
-        torch.Tensor: _description_
+        Tensor: _description_
     """
     ranges = [torch.arange(s, dtype=torch.float32, device=device) for s in baseshape]
     grid = torch.stack(torch.meshgrid(*ranges, indexing='ij'), dim=-1)
     if transform:
         grid = transform.transform(grid)
-    if normalize is not None:
-        grid = normalize_grid_points(normalize, grid).flip(-1)
+    if localshape is not None:
+        grid = (grid / (torch.tensor(localshape, device=device) - 1) * 2 - 1).flip(-1)
     return grid
-
-
-def normalize_grid_points(baseshape: torch.Size, points: torch.Tensor) -> torch.Tensor:
-    """
-    Normalize grid or point coordinates to the range [-1, 1].
-    
-    Note that this assumes the standard coordinate system where the
-    origin is at the center of the first voxel, and therefore align_corners
-    should be used when calling relevant torch functions.
-
-    Args:
-        points (Tensor): Coordinate tensor of shape (..., 3).
-
-    Returns:
-        Tensor: Normalized coordinates matching the input shape.
-    """
-    return points / (torch.tensor(baseshape, device=points.device) - 1) * 2 - 1
 
 
 def stack(*vols):

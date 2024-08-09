@@ -15,7 +15,7 @@ space_lookup = {
 
 class Space:
     """
-    An object designating either the voxel (image volume) or world coordinate space.
+    An object designating either the voxel (image grid) or world coordinate space.
     """
 
     def __init__(self, space: Space | str) -> None:
