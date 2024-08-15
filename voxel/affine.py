@@ -22,6 +22,8 @@ class AffineMatrix:
                 None, the matrix is initialized with the identitiy.
             device (device, optional): Device of the constructed matrix.
         """
+        vx.caching.init_property_cache(self)
+
         if data is None:
             data = torch.eye(4, device=device)
         elif isinstance(data, AffineMatrix):

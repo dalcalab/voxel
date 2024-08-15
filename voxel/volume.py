@@ -126,11 +126,18 @@ class Volume:
         vx.save_volume(self, filename, fmt=fmt)
 
     # -------------------------------------------------------------------------
-    # TO DOCUMENT
+    #  numerical and tensor operations for volume data manipulation
     # -------------------------------------------------------------------------
 
-    def apply(self, func):
+    def apply(self, func: callable) -> Volume:
         """
+        Apply a function to the volume tensor and return a new instance.
+
+        Args:
+            func (callable): The function to apply.
+
+        Returns:
+            Volume: A new volume instance.
         """
         return self.new(func(self.tensor))
 
@@ -148,10 +155,10 @@ class Volume:
         Move the volume tensor to a device.
 
         Args:
-            device: A torch device.
+            device (Device): The target device.
 
         Returns:
-            Volume: A new volume instance.
+            Volume: A new volume instance with the tensor on the target device.
         """
         if device is None:
             return self
@@ -175,7 +182,7 @@ class Volume:
         """
         return self.new(self.tensor.cpu())
 
-    def astype(self, dtype: torch.dtype) -> Volume:
+    def type(self, dtype: torch.dtype) -> Volume:
         """
         Convert the volume tensor to a specified data type.
 
@@ -236,7 +243,7 @@ class Volume:
                 volume is returned.
 
         Returns:
-            Tensor or Volume: The maximum value or volume.
+            Tensor or Volume: The maximum value(s) or volume.
         """
         reduced = self.tensor.amax(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
@@ -252,7 +259,7 @@ class Volume:
                 volume is returned.
 
         Returns:
-            Tensor or Volume: The mininum value or volume.
+            Tensor or Volume: The mininum value(s) or volume.
         """
         reduced = self.tensor.amin(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
@@ -268,7 +275,7 @@ class Volume:
                 volume is returned.
 
         Returns:
-            Tensor or Volume: The sum value or volume.
+            Tensor or Volume: The summed value(s) or volume.
         """
         reduced = self.tensor.sum(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
@@ -328,13 +335,13 @@ class Volume:
         Args:
             min (float, optional): Minimum value to clamp to.
             max (float, optional): Maximum value to clamp to.
-            inplace (bool): Whether to perform the operation in place.
+            inplace (bool): Whether to perform the operation in-place.
 
         Returns:
             Volume: A new (if not in-place) clamped volume instance.
         """
         if inplace:
-            self.tensor.clamp_(min=min, max=max)
+            return self.new(self.tensor.clamp_(min=min, max=max))
         else:
             return self.new(self.tensor.clamp(min=min, max=max))
 
@@ -370,15 +377,16 @@ class Volume:
         device as the current instance.
 
         Args:
-            channels (int, optional): Number of channels for the new volume.
+            channels (int, optional): Number of channels in the new volume.
+                If None, will default to the existing number.
             dtype (torch.dtype, optional): Target data type.
 
         Returns:
             Volume: A new volume instance filled with zeros.
         """
-        shape = self.shape if channels is None else (channels, *self.baseshape)
-        dtype = dtype or self.dtype
-        return self.new(torch.zeros(shape, dtype=dtype, device=self.device))
+        if channels is None:
+            channels = self.num_channels
+        return self.geometry.zeros_like(channels, dtype=dtype)
 
     def ones_like(self,
         channels: int | None = None,
@@ -388,15 +396,16 @@ class Volume:
         device as the current instance.
 
         Args:
-            channels (int, optional): Number of channels for the new volume.
+            channels (int, optional): Number of channels in the new volume.
+                If None, will default to the existing number.
             dtype (torch.dtype, optional): Target data type.
 
         Returns:
             Volume: A new volume instance filled with ones.
         """
-        shape = self.shape if channels is None else (channels, *self.baseshape)
-        dtype = dtype or self.dtype
-        return self.new(torch.ones(shape, dtype=dtype, device=self.device))
+        if channels is None:
+            channels = self.num_channels
+        return self.geometry.ones_like(channels, dtype=dtype)
 
     def full_like(self,
         fill: float,
@@ -408,15 +417,16 @@ class Volume:
 
         Args:
             fill (float): The fill value.
-            channels (int, optional): Number of channels for the new volume.
+            channels (int, optional): Number of channels in the new volume.
+                If None, will default to the existing number.
             dtype (torch.dtype, optional): Target data type.
 
         Returns:
             Volume: A new filled volume instance.
         """
-        shape = self.shape if channels is None else (channels, *self.baseshape)
-        dtype = dtype or self.dtype
-        return self.new(torch.full(shape, fill, dtype=dtype, device=self.device))
+        if channels is None:
+            channels = self.num_channels
+        return self.geometry.full_like(fill, channels, dtype=dtype)
 
     def rand_like(self,
         channels: int | None = None,
@@ -427,15 +437,16 @@ class Volume:
         distribution on the interval [0, 1).
 
         Args:
-            channels (int, optional): Number of channels for the new volume.
+            channels (int, optional): Number of channels in the new volume.
+                If None, will default to the existing number.
             dtype (torch.dtype, optional): Target data type.
 
         Returns:
             Volume: A new random volume instance.
         """
-        shape = self.shape if channels is None else (channels, *self.baseshape)
-        dtype = dtype or self.dtype
-        return self.new(torch.rand(shape, dtype=dtype, device=self.device))
+        if channels is None:
+            channels = self.num_channels
+        return self.geometry.rand_like(channels, dtype=dtype)
 
     def randn_like(self,
         channels: int | None = None,
@@ -446,15 +457,16 @@ class Volume:
         distribution with mean 0 and variance 1
 
         Args:
-            channels (int, optional): Number of channels for the new volume.
+            channels (int, optional): Number of channels in the new volume.
+                If None, will default to the existing number.
             dtype (torch.dtype, optional): Target data type.
 
         Returns:
             Volume: A new random volume instance.
         """
-        shape = self.shape if channels is None else (channels, *self.baseshape)
-        dtype = dtype or self.dtype
-        return self.new(torch.randn(shape, dtype=dtype, device=self.device))
+        if channels is None:
+            channels = self.num_channels
+        return self.geometry.randn_like(channels, dtype=dtype)
 
     def isin(self, elements: torch.Tensor) -> Volume:
         """
