@@ -6,9 +6,9 @@ from __future__ import annotations
 
 
 space_lookup = {
-    'image': 'V',
     'voxel': 'V',
     'vox': 'V',
+    'image': 'V',
     'world': 'W',
 }
 

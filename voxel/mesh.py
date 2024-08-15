@@ -303,15 +303,20 @@ class Mesh:
         the sparse Laplacian matrix, but rather the vertex gather method, which is roughly 2x faster.
 
         Args:
-            features (Tensor): Input features to smooth of shape (V, C).
+            features (Tensor): Input features to smooth of the shape $(V,)$ or $(V, C)$.
             alpha (float, optional): Smoothing factor between 0 and 1. Defaults to 0.5.
             iterations (int, optional): Number of smoothing iterations. Defaults to 1.
 
         Returns:
-            Tensor: Smoothed features of shape (V, C).
+            Tensor: Smoothed features matching the input shape.
         """
+        is1d = features.ndim == 1
+        if is1d:
+            features = features.view(-1, 1)
         for _ in range(iterations):
             features = (1 - alpha) * features + alpha * self.gather(features)
+        if is1d:
+            features = features.squeeze(-1)
         return features
 
     def transform(self, transform: vx.AffineMatrix) -> Mesh:

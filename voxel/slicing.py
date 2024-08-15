@@ -80,7 +80,7 @@ def slicing_to_coordinates(slicing: tuple, shape: tuple) -> tuple:
         shape (tuple of int): The shape of the tensor.
 
     Returns:
-        tuple of Tensor: minimum coordinates, maximum coordinates, and strides.
+        tuple of Tensor: Minimum coordinates, maximum coordinates, and strides.
     """
     shape = torch.tensor(shape, dtype=torch.int)
 

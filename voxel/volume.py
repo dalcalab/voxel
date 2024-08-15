@@ -635,8 +635,21 @@ class Volume:
     # methods for manipulating spatial geometry and computing coordinates
     # -------------------------------------------------------------------------
 
-    def sample(self, points: torch.Tensor, space: vx.Space, mode: str = 'linear') -> torch.Tensor:
+    def sample(self,
+        points: torch.Tensor | vx.Mesh,
+        space: vx.Space,
+        mode: str = 'linear') -> torch.Tensor:
         """
+        Sample volume features at a set of points.
+
+        Args:
+            points (Tensor | Mesh): A set of points in world or voxel coordinates with
+                shape $(N, 3)$. If the input is a mesh, the vertex positions are used.
+            space (Space): The coordinate space of the input points or mesh.
+            mode (str, optional): The sampling mode, either 'linear' or 'nearest'.
+
+        Returns:
+            Tensor: The sampled features, with shape $(N, C)$.
         """
         if isinstance(points, vx.Mesh):
             points = points.vertices
@@ -656,7 +669,8 @@ class Volume:
         Args:
             threshold (float, optional): Scalar threshold that determines
                 whether a voxel is inside or outside the mesh boundary.
-            space (Space, optional): The coordinate space of mesh vertices.
+            space (Space, optional): The coordinate space of mesh vertices. Default
+                is the world coordinate space.
 
         Returns:
             Mesh: Tesselated mesh.
@@ -718,12 +732,12 @@ class Volume:
         mesh = vx.mesh.construct_box_mesh(min_point, max_point)
         return mesh.transform(self.geometry)
 
-    def centroids(self, space: vx.Space = 'voxel') -> torch.Tensor:
+    def centroids(self, space: vx.Space) -> torch.Tensor:
         """
         Compute the centroids (centers of mass) for each volume channel.
 
         Args:
-            space (Space, optional): The space of computed centroid coordinates.
+            space (Space): The coordinate space of computed centroids.
 
         Returns:
             Tensor: Coordinates of shape (C, 3).
