@@ -20,6 +20,7 @@ class Mesh:
             vertices (Tensor): Vertex coordinates of shape (V, 3).
             faces (Tensor): Triangular face integer indices of shape (F, 3).
         """
+        vx.caching.init_property_cache(self)
         self.vertices = vertices
         self.faces = faces
 
@@ -72,7 +73,16 @@ class Mesh:
         Args:
             vertices (Tensor): The new vertices tensor replacement.
         """
-        return self.__class__(vertices, self.faces)
+        mesh = self.__class__(vertices, self.faces)
+        vx.caching.transfer_property_cache(self, mesh)
+        return mesh
+
+    @property
+    def device(self) -> torch.Device:
+        """
+        The device of the mesh vertex and face tensors.
+        """
+        return self.vertices.device
 
     def to(self, device: torch.Device) -> Mesh:
         """
@@ -106,6 +116,18 @@ class Mesh:
         """
         return Mesh(self.vertices.cuda(), self.faces.cuda())
 
+    def type(self, dtype: torch.dtype) -> Mesh:
+        """
+        Cast the mesh vertices to a new data type.
+
+        Args:
+            dtype (torch.dtype): The target vertex data type.
+
+        Returns:
+            Mesh: A new mesh instance with the casted vertices.
+        """
+        return self.new(self.vertices.type(dtype))
+
     def save(self, filename: os.PathLike, fmt: str = None, **kwargs) -> None:
         """
         Save the mesh to a file.
@@ -118,14 +140,14 @@ class Mesh:
         """
         vx.save_mesh(self, filename, fmt=fmt, **kwargs)
 
-    @property
+    @vx.caching.cached
     def triangles(self) -> torch.Tensor:
         """
         Triangle coordinate arrary with shape (F, 3, 3).
         """
         return self.vertices[self.faces]
 
-    @property
+    @vx.caching.cached
     def triangles_cross(self) -> torch.Tensor:
         """
         Vertex cross-product with shape (F, 3).
@@ -133,14 +155,38 @@ class Mesh:
         vecs = torch.diff(self.triangles, dim=1)
         return torch.cross(vecs[:, 0], vecs[:, 1])
 
-    @property
+    @vx.caching.cached_transferable
     def edges(self) -> torch.Tensor:
         """
-        All directional edges in the mesh, with shape (E, 2).
+        All directional edges in the mesh, with shape (E, 2). Note these are not unique.
         """
-        return self.faces[:, [0, 1, 1, 2, 2, 0]].view((-1, 2))
+        return self.faces.repeat_interleave(2, dim=-1).roll(-1, dims=-1).view((-1, 2))
 
-    @property
+    @vx.caching.cached_transferable
+    def uniform_laplacian(self) -> torch.Tensor:
+        """
+        The sparse uniform Laplacian matrix for the mesh connectivity.
+        Note that it is generally faster to use the `gather()` or `smooth_features()`
+        methods for diffusing features on the mesh graph.
+        """
+        V = self.num_vertices
+
+        # compute the uniform weight matrix
+        dest = self.edges[:, 0]
+        count = torch.bincount(dest, minlength=V)
+        weight = count[dest]
+        val = torch.where(weight > 0.0, 1.0 / weight, weight)
+        L = torch.sparse_coo_tensor(self.edges.T.type(torch.int64), val, (V, V))
+
+        # subtract identity
+        idx = torch.arange(V, device=self.device)
+        idx = torch.stack([idx, idx], dim=0)
+        # NOTE: once sparse torch.eye is implemented globally, use that instead
+        ones = torch.ones(V, dtype=torch.float32, device=self.device)
+        L -= torch.sparse_coo_tensor(idx, ones, (V, V))
+        return L
+
+    @vx.caching.cached_transferable
     def edge_face(self) -> torch.Tensor:
         """
         Face indices corresponding to each directional edge in the
@@ -149,7 +195,7 @@ class Mesh:
         arange = torch.arange(self.num_faces, device=self.faces.device)
         return arange.repeat_interleave(3).reshape(-1)
 
-    @property
+    @vx.caching.cached_transferable
     def unique_edge_indices(self) -> tuple:
         """
         Indices that extract all unique edges from the directional edge list.
@@ -157,7 +203,8 @@ class Mesh:
         device = self.faces.device
         aligned = self.edges.sort(dim=1)[0]
 
-        # similar result to lexsort (TODO: this is very slow)
+        # this is a way to do lexsort in pytorch, which is faster
+        # than using torch.unique
         idx = aligned[:, 1].argsort(dim=-1, stable=True)
         order = idx.gather(-1, aligned[:, 0].gather(-1, idx).argsort(dim=-1, stable=True))
 
@@ -172,14 +219,14 @@ class Mesh:
         indices = order[matched[:-1]]
         return indices, reverse
 
-    @property
+    @vx.caching.cached_transferable
     def unique_edges(self):
         """
         Unique bi-directional edges in the mesh, with shape (U, 2).
         """
         return self.edges[self.unique_edge_indices[0]]
 
-    @property
+    @vx.caching.cached_transferable
     def adjacent_faces(self):
         """
         Adjacent faces indices corresponding to each edge in `unique_edges`.
@@ -188,36 +235,36 @@ class Mesh:
         indices[:, 1] += 1
         return self.edge_face[indices]
 
-    @property
+    @vx.caching.cached
     def face_normals(self) -> torch.Tensor:
         """
         Face (unit) normals with shape (F, 3).
         """
-        return normalize(self.triangles_cross)
+        return torch.nn.functional.normalize(self.triangles_cross)
 
-    @property
+    @vx.caching.cached
     def face_areas(self) -> torch.Tensor:
         """
         Face areas with shape (F,)
         """
         return (self.triangles_cross ** 2).sum(-1).sqrt() / 2
 
-    @property
+    @vx.caching.cached
     def face_angles(self) -> torch.Tensor:
         """
         Face angles (in radians) with shape (F, 3).
         """
         triangles = self.triangles
-        u = normalize(triangles[:, 1] - triangles[:, 0])
-        v = normalize(triangles[:, 2] - triangles[:, 0])
-        w = normalize(triangles[:, 2] - triangles[:, 1])
+        u = torch.nn.functional.normalize(triangles[:, 1] - triangles[:, 0])
+        v = torch.nn.functional.normalize(triangles[:, 2] - triangles[:, 0])
+        w = torch.nn.functional.normalize(triangles[:, 2] - triangles[:, 1])
         angles = torch.zeros((self.num_faces, 3), device=u.device)
         angles[:, 0] = ( u * v).sum(-1).clamp(-1, 1).arccos()
         angles[:, 1] = (-u * w).sum(-1).clamp(-1, 1).arccos()
         angles[:, 2] = torch.pi - angles[:, 0] - angles[:, 1]
         return angles
 
-    @property
+    @vx.caching.cached
     def vertex_normals(self) -> torch.Tensor:
         """
         Vertex (unit) normals, computed from face normals weighted by their angle.
@@ -225,9 +272,9 @@ class Mesh:
         scalars = self.face_angles.view(-1, 1) * self.face_normals.repeat_interleave(3, dim=0)
         indices = self.faces.type(torch.int64).view(-1, 1).expand(-1, 3)
         normals = torch.zeros_like(self.vertices).scatter_add(-2, indices, scalars)
-        return normalize(normals)
+        return torch.nn.functional.normalize(normals)
 
-    def gather(self, features: torch.Tensor, reduce: str = 'mean'):
+    def gather(self, features: torch.Tensor, reduce: str = 'mean') -> torch.Tensor:
         """
         """
         edges = self.edges
@@ -236,6 +283,36 @@ class Mesh:
         reduced = torch.zeros_like(features).scatter_reduce(-2, indices, source,
                                                             reduce=reduce, include_self=False)
         return reduced
+
+    def smooth_mesh(self, alpha: float = 0.5, iterations: int = 1) -> Mesh:
+        """
+        Smooth the mesh vertex positions with the uniform Laplacian operator.
+
+        Args:
+            alpha (float, optional): Smoothing factor between 0 and 1. Defaults to 0.5.
+            iterations (int, optional): Number of smoothing iterations. Defaults to 1.
+
+        Returns:
+            Mesh: Smoothed mesh.
+        """
+        return self.new(self.smooth_features(self.vertices, alpha=alpha, iterations=iterations))
+
+    def smooth_features(self, features: torch.Tensor, alpha: float = 0.5, iterations: int = 1) -> torch.Tensor:
+        """
+        Smooth vertex features with the uniform Laplacian operator. Note that this does not actually use
+        the sparse Laplacian matrix, but rather the vertex gather method, which is roughly 2x faster.
+
+        Args:
+            features (Tensor): Input features to smooth of shape (V, C).
+            alpha (float, optional): Smoothing factor between 0 and 1. Defaults to 0.5.
+            iterations (int, optional): Number of smoothing iterations. Defaults to 1.
+
+        Returns:
+            Tensor: Smoothed features of shape (V, C).
+        """
+        for _ in range(iterations):
+            features = (1 - alpha) * features + alpha * self.gather(features)
+        return features
 
     def transform(self, transform: vx.AffineMatrix) -> Mesh:
         """
@@ -307,13 +384,9 @@ class Mesh:
         """
         import scipy.sparse as sp
 
-        # TODO: extract this out to a different function (note: using unique edges
-        # is maybe faster, but would need to change connected_components arg to undirected
-        edges = self.faces[:, [0, 1, 1, 2, 2, 0]].view((-1, 2))
-
         # convert to a sparse scipy matrix and compute the components
         N = self.num_vertices
-        row, col = edges.detach().cpu().T.numpy()
+        row, col = self.edges.detach().cpu().T.numpy()
         adj = sp.coo_matrix((np.ones(len(row)), (row, col)), (N, N))
         num_found, components = sp.csgraph.connected_components(adj)
 
@@ -364,8 +437,3 @@ def construct_box_mesh(min_point: torch.Tensor, max_point: torch.Tensor) -> Mesh
 
     points = (mask == 0) * (min_point - 0.5) + mask * (max_point + 0.5)
     return Mesh(points, faces)
-
-
-def normalize(vector):
-    # TODO move this
-    return vector / (vector * vector).sum(-1).sqrt().unsqueeze(-1)
