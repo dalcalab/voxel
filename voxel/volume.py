@@ -129,6 +129,11 @@ class Volume:
     # TO DOCUMENT
     # -------------------------------------------------------------------------
 
+    def apply(self, func):
+        """
+        """
+        return self.new(func(self.tensor))
+
     def detach(self) -> Volume:
         """
         Detach the volume tensor from the current computational graph.
@@ -503,11 +508,6 @@ class Volume:
             k = int(flattened.numel() * q) + 1
             return flattened.topk(k, largest=False, sorted=False).values.max()
 
-    def sigmoid(self):
-        """
-        """
-        return self.new(self.tensor.sigmoid())
-
     # -------------------------------------------------------------------------
     # indexing / operator overloads for tensor-style voxel data manipulation
     # -------------------------------------------------------------------------
@@ -623,6 +623,19 @@ class Volume:
     # methods for manipulating spatial geometry and computing coordinates
     # -------------------------------------------------------------------------
 
+    def sample(self, points: torch.Tensor, space: vx.Space, mode: str = 'linear') -> torch.Tensor:
+        """
+        """
+        if isinstance(points, vx.Mesh):
+            points = points.vertices
+        if vx.Space(space) == 'world':
+            points = self.geometry.inverse().transform(points)
+        points = self.geometry.voxel_to_local().transform(points)
+        grid = points.view(1, len(points), 1, 1, 3)
+        sampled = torch.nn.functional.grid_sample(self.tensor.unsqueeze(0), grid,
+            align_corners=True, mode=('bilinear' if mode == 'linear' else 'nearest'))
+        return sampled.squeeze(dim=(0, 3, 4)).swapaxes(0, 1)
+
     def tesselate(self, threshold: float = 0.5, space: vx.Space = 'world') -> vx.Mesh:
         """
         Tesselate a mesh around connected voxel components.
@@ -646,6 +659,8 @@ class Volume:
         padded = self.detach().pad(self.geometry.spacing)
         vertices, faces = marching_cubes(padded.tensor.float(), threshold,
                                          return_local_coords=False)
+        if len(vertices[0]) == 0:
+            raise ValueError('empty volume - could not tesselate')
         mesh = vx.Mesh(vertices[0].flip(-1) - 1, faces[0])
 
         # 
