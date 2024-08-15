@@ -101,6 +101,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
     @vx.caching.cached
     def orientation(self) -> Orientation:
         """
+        Anatomical orientation of the voxel coordinate system.
         """
         return Orientation(self)
 
@@ -178,8 +179,15 @@ class AcquisitionGeometry(vx.AffineMatrix):
                                        slice_direction=self._explicit_slice_direction)
         return geometry
 
-    def reorient(self, target):
+    def reorient(self, target: vx.Orientation) -> AcquisitionGeometry:
         """
+        Reorient the acquisition geometry to a new anatomical voxel orientation.
+
+        Args:
+            target (Orientation): Target orientation to reorient to.
+        
+        Returns:
+            AcquisitionGeometry: Reoriented geometry.
         """
         source = self.orientation
         target = cast_orientation(target)
@@ -254,6 +262,90 @@ class AcquisitionGeometry(vx.AffineMatrix):
         mat[[0, 2]] = mat[[2, 0]]
         return vx.AffineMatrix(mat)
 
+    def zeros_like(self,
+        channels: int = 1,
+        dtype: torch.dtype | None = None) -> vx.Volume:
+        """
+        Create a volume of zeros.
+
+        Args:
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new volume instance filled with zeros.
+        """
+        shape = (channels, *self.baseshape)
+        return vx.Volume(torch.zeros(shape, dtype=dtype, device=self.device), self)
+
+    def ones_like(self,
+        channels: int = 1,
+        dtype: torch.dtype | None = None) -> vx.Volume:
+        """
+        Create a volume of ones.
+
+        Args:
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new volume instance filled with ones.
+        """
+        shape = (channels, *self.baseshape)
+        return vx.Volume(torch.ones(shape, dtype=dtype, device=self.device), self)
+
+    def full_like(self,
+        fill: float,
+        channels: int = 1,
+        dtype: torch.dtype | None = None) -> vx.Volume:
+        """
+        Create a volume filled with a specific value.
+
+        Args:
+            fill (float): The fill value.
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new filled volume instance.
+        """
+        shape = (channels, *self.baseshape)
+        return vx.Volume(torch.full(shape, fill, dtype=dtype, device=self.device), self)
+
+    def rand_like(self,
+        channels: int = 1,
+        dtype: torch.dtype | None = None) -> vx.Volume:
+        """
+        Create a volume of random values. Values are sampled from a uniform
+        distribution on the interval [0, 1).
+
+        Args:
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new random volume instance.
+        """
+        shape = (channels, *self.baseshape)
+        return vx.Volume(torch.rand(shape, dtype=dtype, device=self.device), self)
+
+    def randn_like(self,
+        channels: int = 1,
+        dtype: torch.dtype | None = None) -> vx.Volume:
+        """
+        Create a volume of random values. Values are sampled from a normal
+        distribution with mean 0 and variance 1.
+
+        Args:
+            channels (int, optional): Number of channels for the new volume.
+            dtype (torch.dtype, optional): Target data type.
+
+        Returns:
+            Volume: A new random volume instance.
+        """
+        shape = (channels, *self.baseshape)
+        return vx.Volume(torch.randn(shape, dtype=dtype, device=self.device), self)
+
 
 def cast_acquisition_geometry(obj: vx.Volume | AcquisitionGeometry) -> AcquisitionGeometry:
     """
@@ -274,9 +366,30 @@ def cast_acquisition_geometry(obj: vx.Volume | AcquisitionGeometry) -> Acquisiti
 
 
 class Orientation:
+    """
+    The anatomical orientation of the voxel coordinate system.
 
-    def __init__(self, item) -> None:
+    There are 48 possible orientations of voxel data in a 3D grid. These are
+    defined by the permutations and flips of the grid axes relative to a global
+    coordinate space. By default, we use a 'RAS' anatomical world coordinate system,
+    which is characterized by the following axis directions:
+    
+        - x axis: left (L) to right (R)
+        - y axis: posterior (P) to anterior (A)
+        - z axis: inferior (I) to superior (S)
 
+    Thus, orientations are defined by a three-character string, which maps a voxel
+    coordinate axis to the corresponding anatomical axis direction in 'RAS' space.
+    """
+
+    def __init__(self, item: str | vx.AffineMatrix) -> None:
+        """
+        Args:
+            item (str | AffineMatrix): Orientation string or affine matrix.
+        """
+
+        # this defines the axes of the anatomical world space. in the future, this
+        # could be a global setting configured changed by the user
         self.axes = 'LRPAIS'
 
         if isinstance(item, str):
@@ -293,24 +406,29 @@ class Orientation:
             self.flip = tensor[tensor.abs().argmax(0), [0, 1, 2]].sign().int()
 
         else:
-            return ValueError(f'cannot initialize Orientation from {type(item)}')
+            return ValueError(f'cannot create orientation from {type(item)}')
 
+    @property
     def name(self) -> str:
         """
+        Abbreviated orientation name.
         """
         indices = self.dims * 2 + (self.flip > 0)
         return ''.join([self.axes[i] for i in indices])
 
+    def __repr__(self) -> str:
+        return f"Orientation('{self.name}')"
+
 
 def cast_orientation(obj) -> Orientation:
     """
-    Cast item to an Orientation
+    Cast object to an Orientation instance.
 
     Args:
         obj (any): Object to cast.
     
     Returns:
-        Orientation
+        Orientation: Casted orientation.
     """
     if isinstance(obj, Orientation):
         return obj
