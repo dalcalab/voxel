@@ -819,7 +819,7 @@ class Volume:
                 slicing = (slicing[0], *vx.slicing.coordinates_to_slicing(minc, maxc, stride))
         else:
             raise ValueError(f'unknown cropping item: {type(cropping)}')
-        
+
         # update the geometry based on any inferred voxel shift or scale
         geometry = self.geometry
         if any(minc != 0):
@@ -855,23 +855,28 @@ class Volume:
 
     def reorient(self, orientation: vx.Orientation) -> Volume:
         """
+        Transform the volume to a new orientation. This is faster than
+        achieving the same result through resampling.
+
+        Args:
+            orientation (Orientation): The target orientation.
+        
+        Returns:
+            Volume: The reoriented volume instance.
         """
         source = self.geometry.orientation
         target = vx.cast_orientation(orientation)
 
-        # 
-        perm = source.dims[target.dims]
+        perm = source.dims.argsort()[target.dims]
         tensor = self.tensor
         if (perm != torch.tensor((0, 1, 2))).any():
             tensor = tensor.permute(0, *(perm + 1))
 
-        # 
         flip = source.flip[perm] * target.flip
         indices = (flip < 0).argwhere()
         if len(indices) > 0:
             tensor = tensor.flip(*(indices + 1))
 
-        # 
         return self.new(tensor, self.geometry.reorient(orientation))
 
     def resample_like(self,
@@ -1153,3 +1158,26 @@ def stack(*vols):
     if len(vols) == 1:
         return vols[0]
     return vols[0].new(torch.cat([v.tensor for v in vols], dim=0))
+
+
+def volumes_equal(
+    a: Volume,
+    b: Volume,
+    vol_tol: float = 1e-6,
+    geom_tol: float = 1e-6) -> bool:
+    """
+    Check if two volumes are equal within a given tolerance.
+
+    Args:
+        a, b (Volume): Volumes to compare.
+        vol_tol (float, optional): Absolute tolerance for volume tensor comparison.
+        geom_tol (float, optional): Absolute tolerance for geometry comparison.
+
+    Returns:
+        bool: True if the volumes are equal, False otherwise.
+    """
+    if not a.tensor.allclose(b.tensor, atol=vol_tol, rtol=0):
+        return False
+    if not a.geometry.tensor.allclose(b.geometry.tensor, atol=geom_tol, rtol=0):
+        return False
+    return True

@@ -19,6 +19,7 @@ from .acquisition import cast_acquisition_geometry
 
 from . import volume
 from .volume import Volume
+from .volume import volumes_equal
 
 from . import mesh
 from .mesh import Mesh

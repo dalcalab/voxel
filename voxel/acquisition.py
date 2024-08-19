@@ -192,7 +192,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         source = self.orientation
         target = cast_orientation(target)
 
-        perm = source.dims[target.dims]
+        perm = source.dims.argsort()[target.dims]
         flip = source.flip * target.flip[perm.argsort()]
 
         baseshape = torch.tensor(self.baseshape)
@@ -402,8 +402,10 @@ class Orientation:
 
         elif isinstance(item, vx.AffineMatrix):
             tensor = item[:3, :3]
-            self.dims = tensor.abs().argmax(1)
-            self.flip = tensor[tensor.abs().argmax(0), [0, 1, 2]].sign().int()
+            # self.dims = tensor.abs().argmax(1)
+            # self.flip = tensor[tensor.abs().argmax(0), [0, 1, 2]].sign().int()
+            self.dims = tensor.abs().argmax(0)
+            self.flip = tensor[self.dims, [0, 1, 2]].sign().int()
 
         else:
             return ValueError(f'cannot create orientation from {type(item)}')
@@ -418,6 +420,10 @@ class Orientation:
 
     def __repr__(self) -> str:
         return f"Orientation('{self.name}')"
+    
+    def __eq__(self, other: Orientation) -> bool:
+        other = cast_orientation(other)
+        return torch.equal(self.dims, other.dims) and torch.equal(self.flip, other.flip)
 
 
 def cast_orientation(obj) -> Orientation:
