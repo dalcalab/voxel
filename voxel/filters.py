@@ -93,3 +93,22 @@ def gaussian_blur(
         blurred = blurred.squeeze(0)
 
     return blurred
+
+
+def antialias_smoothing(image: torch.Tensor, factors: torch.Tensor, batched: bool = False) -> torch.Tensor:
+    """
+    Apply a pre-downsampling Gaussian filter to an image tensor. This is help reduce
+    aliasing artifacts. The sigmas of the filter are determined by the downsampling
+    factor divided by 3 (factors less than 1.1 are clamped).
+
+    Args:
+        image (Tensor): An image tensor with preceding channel dimensions. A
+            batch dimension can be included by setting `batched=True`.
+        factors (Tensor): The downsampling factors for each dimension.
+        batched (bool, optional): If True, assume image has a batch dimension.
+
+    Returns:
+        Tensor: The smoothed tensor with the same shape as the input tensor.
+    """
+    sigmas = torch.as_tensor(factors).clamp(1.1) / 3
+    return gaussian_blur(image, sigmas, batched=batched)

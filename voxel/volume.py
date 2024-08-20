@@ -882,7 +882,8 @@ class Volume:
     def resample_like(self,
         target: Volume | vx.AcquisitionGeometry,
         mode: str = 'linear',
-        padding_mode: str = 'zeros') -> Volume:
+        padding_mode: str = 'zeros',
+        antialias: bool = False) -> Volume:
         """
         Resample the volume features to match the geometry of a target volume.
 
@@ -890,6 +891,8 @@ class Volume:
             target (Volume | AcquisitionGeometry): Target acquisition geometry.
             mode (str, optional): Interpolation mode.
             padding_mode (str, optional): Padding mode for outside grid values.
+            antialias (bool, optional): If True, will apply a Gaussian filter
+                before resampling to avoid aliasing artifacts.
 
         Returns:
             Volume: Resampled volume instance.
@@ -943,8 +946,15 @@ class Volume:
         grid = volume_grid(target.baseshape, transform=transform,
                            device=self.device, localshape=self.baseshape)
 
+        # apply antialiasing (gaussian smoothing) if requested
+        source = self.tensor.float()
+        if antialias:
+            dim_map = target.orientation.dim_map(self.geometry)
+            factors = target.spacing[dim_map] / self.geometry.spacing
+            source = vx.filters.antialias_smoothing(source, factors)
+
         resampled = torch.nn.functional.grid_sample(
-                        input=self.tensor.float().unsqueeze(0),
+                        input=source.unsqueeze(0),
                         grid=grid.unsqueeze(0),
                         mode=('bilinear' if mode == 'linear' else mode),
                         padding_mode=padding_mode,
@@ -959,7 +969,8 @@ class Volume:
     def resample(self,
         spacing: float | torch.Tensor,
         mode: str = 'linear',
-        padding_mode: str = 'zeros') -> Volume:
+        padding_mode: str = 'zeros',
+        antialias: bool = False) -> Volume:
         """
         Resample voxel features to a new voxel grid spacing.
 
@@ -968,6 +979,8 @@ class Volume:
                 is assumed if a scalar is provided.
             mode (str, optional): Interpolation mode.
             padding_mode (str, optional): Padding mode for outside grid values.
+            antialias (bool, optional): If True, will apply a Gaussian filter
+                before resampling to avoid aliasing artifacts.
 
         Returns:
             Volume: Volume resampled to the target voxel spacing.
@@ -989,7 +1002,7 @@ class Volume:
         matrix = self.geometry.shift(shift, space='voxel').scale(scale, space='voxel')
         target = vx.AcquisitionGeometry(newshape, matrix)
 
-        return self.resample_like(target, mode=mode, padding_mode=padding_mode)
+        return self.resample_like(target, mode=mode, padding_mode=padding_mode, antialias=antialias)
 
     def reshape(self, baseshape: torch.Size) -> Volume:
         """

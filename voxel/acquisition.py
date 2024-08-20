@@ -425,6 +425,18 @@ class Orientation:
         other = cast_orientation(other)
         return torch.equal(self.dims, other.dims) and torch.equal(self.flip, other.flip)
 
+    def dim_map(self, target: Orientation) -> torch.Tensor:
+        """
+        Map dimensions from this orientation to another.
+
+        Args:
+            target (Orientation): Target orientation.
+
+        Returns:
+            Tensor: 3D integer mapping of dimensions.
+        """
+        return self.dims.argsort()[cast_orientation(target).dims]
+
 
 def cast_orientation(obj) -> Orientation:
     """
