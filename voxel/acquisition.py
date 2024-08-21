@@ -206,6 +206,55 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         return AcquisitionGeometry(baseshape[perm], self @ trf, slice_direction=slice_direction)
 
+    def resample(self, spacing: float | torch.Tensor) -> AcquisitionGeometry:
+        """
+        Resample to a new voxel grid spacing.
+
+        Args:
+            spacing (float |Tensor): Target voxel spacing. An isotropic target
+                is assumed if a scalar is provided.
+
+        Returns:
+            AcquisitionGeometry: Resampled geometry.
+        """
+        if not torch.is_tensor(spacing):
+            spacing = torch.tensor(spacing, dtype=torch.float32)
+        if spacing.ndim == 0:
+            spacing = spacing.repeat(3)
+        if spacing.ndim != 1 or spacing.shape[0] != 3:
+            raise ValueError(f'expected 3D spacing, got {spacing.ndim}D')
+
+        # compute new shapes and lengths of the new grid (we'll round up here to avoid losing any signal)
+        curshape = torch.tensor(self.baseshape, dtype=torch.float32)
+        newshape = (self.spacing * curshape / spacing).ceil().int()
+
+        # determine the new geometry
+        scale = spacing / self.spacing
+        shift = 0.5 * scale * (1 - newshape / curshape)
+        matrix = self.shift(shift, space='voxel').scale(scale, space='voxel')
+        geometry = vx.AcquisitionGeometry(newshape, matrix)
+        return geometry
+
+    def reshape(self, baseshape: torch.Size) -> AcquisitionGeometry:
+        """
+        Modify the spatial extent of the volume geometry, cropping or padding around the
+        center image to fit a given **baseshape**.
+
+        This method is symmetric in that performing a reverse reshape operation
+        will always yeild the original geometry.
+
+        args:
+            baseshape (Size): Target spatial (3D) shape.
+        
+        returns:
+            AcquisitionGeometry: Reshaped geometry.
+        """
+        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
+        reshaped = vx.AcquisitionGeometry(baseshape=baseshape,
+                                          matrix=self.geometry.shift(shift, space='voxel'),
+                                          slice_direction=self.geometry._explicit_slice_direction)
+        return reshaped
+
     def bounds(self, margin: float | torch.Tensor = None) -> vx.Mesh:
         """
         Compute a box mesh enclosing the bounds of the grid.

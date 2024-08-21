@@ -280,6 +280,22 @@ class Volume:
         reduced = self.tensor.sum(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
+    def mean(self, dim: int | None = None) -> Volume | torch.Tensor:
+        """
+        Compute the mean of all voxels.
+
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
+
+        Returns:
+            Tensor or Volume: The mean value(s) or volume.
+        """
+        reduced = self.tensor.mean(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
+
     def floor(self) -> Volume:
         """
         Apply the floor operation to the volume features.
@@ -1011,23 +1027,7 @@ class Volume:
         Returns:
             Volume: Volume resampled to the target voxel spacing.
         """
-        if not torch.is_tensor(spacing):
-            spacing = torch.tensor(spacing, dtype=torch.float32)
-        if spacing.ndim == 0:
-            spacing = spacing.repeat(3)
-        if spacing.ndim != 1 or spacing.shape[0] != 3:
-            raise ValueError(f'expected 3D spacing, got {spacing.ndim}D')
-
-        # compute new shapes and lengths of the new grid (we'll round up here to avoid losing any data)
-        curshape = torch.tensor(self.baseshape, dtype=torch.float32)
-        newshape = (self.geometry.spacing * curshape / spacing).ceil().int()
-
-        # determine the new geometry
-        scale = spacing / self.geometry.spacing
-        shift = 0.5 * scale * (1 - newshape / curshape)
-        matrix = self.geometry.shift(shift, space='voxel').scale(scale, space='voxel')
-        target = vx.AcquisitionGeometry(newshape, matrix)
-
+        target = self.geometry.resample(spacing)
         return self.resample_like(target, mode=mode, padding_mode=padding_mode, antialias=antialias)
 
     def reshape(self, baseshape: torch.Size) -> Volume:
@@ -1044,11 +1044,7 @@ class Volume:
         returns:
             Volume: Reshaped volume instance.
         """
-        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
-        target = vx.AcquisitionGeometry(baseshape=baseshape,
-                                        matrix=self.geometry.shift(shift, space='voxel'),
-                                        slice_direction=self.geometry._explicit_slice_direction)
-        return self.resample_like(target, mode='nearest')
+        return self.resample_like(self.geometry.reshape(baseshape), mode='nearest')
 
     def pad(self, delta: torch.Tensor) -> Volume:
         """

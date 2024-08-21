@@ -54,9 +54,6 @@ def test_orientation_equality() -> None:
 
 def test_reorientation() -> None:
 
-    torch.manual_seed(0)
-    random.seed(0)
-
     # random volume
     vol = vx.Volume(torch.rand(10, 20, 30), torch.diag(torch.tensor([1, 1.2, 0.8, 1])))
 
