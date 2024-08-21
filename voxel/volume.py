@@ -943,22 +943,48 @@ class Volume:
         # if we got here, it means have to resort to doing a grid interpolation, so first
         # build the coordinate grid for the target image
         transform = self.geometry.inverse() @ target
-        grid = volume_grid(target.baseshape, transform=transform,
+
+        if antialias:
+            # if antialiasing is enabled, we'll need to do some extra work. the goal is to smooth
+            # intensities along a downsampling direction. since there is no guarantee that the
+            # target geometry dimensions are aligned with the source grid (e.g. consider a rotation
+            # resampling), we can't just smooth the source image and sample it using the target grid.
+            # instead, we need to compute an intermediate grid that is aligned with the target so that
+            # we can apply smoothing kernels in each downsampling directions of the target geometry.
+            # the intermediate grid is a multiple of the target grid (determined by the downsample factor)
+            # and we can use strided convolutions to get the final resampled image efficiently.
+
+            if mode != 'linear':
+                raise ValueError('antialiasing only supported with linear interpolation')
+
+            inter_space = vx.AcquisitionGeometry(target.baseshape, transform)
+            down_factor = inter_space.spacing.clamp(1).floor().int()
+
+            # blur with a sigma of 1/3 of the downsample factor
+            sigma = (down_factor > 1) * (down_factor.float() / 3)
+
+            # compute the padding required for the Gaussian kernel (hardcoded the truncate value)
+            # along with the updated grid transform
+            truncate = 2
+            padding = (truncate * sigma + 0.5).int()
+            intermediate_baseshape = [int(s * f) + p * 2 for s, f, p in zip(target.baseshape, down_factor, padding)]
+            transform = inter_space.scale(1 / down_factor, space='voxel').shift(-padding, space='voxel')
+        else:
+            intermediate_baseshape = target.baseshape
+
+        grid = volume_grid(intermediate_baseshape, transform=transform,
                            device=self.device, localshape=self.baseshape)
 
-        # apply antialiasing (gaussian smoothing) if requested
-        source = self.tensor.float()
-        if antialias:
-            dim_map = target.orientation.dim_map(self.geometry)
-            factors = target.spacing[dim_map] / self.geometry.spacing
-            source = vx.filters.antialias_smoothing(source, factors)
-
         resampled = torch.nn.functional.grid_sample(
-                        input=source.unsqueeze(0),
+                        input=self.tensor.float().unsqueeze(0),
                         grid=grid.unsqueeze(0),
                         mode=('bilinear' if mode == 'linear' else mode),
                         padding_mode=padding_mode,
                         align_corners=True).squeeze(0)
+
+        if antialias:
+            resampled = vx.filters.gaussian_blur(resampled, sigma, stride=tuple(down_factor),
+                                                 padding='valid', truncate=truncate)
 
         # probably ideal to keep the data type consistent when using nearest neighbor sampling
         if mode == 'nearest':
