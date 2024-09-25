@@ -1009,7 +1009,9 @@ class Volume:
         return self.new(resampled, target)
 
     def resample(self,
-        spacing: float | torch.Tensor,
+        spacing: float | torch.Tensor = None,
+        in_plane_spacing: float | torch.Tensor = None,
+        slice_spacing: float | torch.Tensor = None,
         mode: str = 'linear',
         padding_mode: str = 'zeros',
         antialias: bool = False) -> Volume:
@@ -1019,6 +1021,10 @@ class Volume:
         Args:
             spacing (float |Tensor): Target voxel spacing. An isotropic target
                 is assumed if a scalar is provided.
+            in_plane_spacing (float | Tensor): Target in-plane voxel spacing. Mutually
+                exclusive with the `spacing` argument.
+            slice_spacing (float | Tensor): Target slice spacing. Mutually exclusive
+                except with the `spacing` argument.
             mode (str, optional): Interpolation mode.
             padding_mode (str, optional): Padding mode for outside grid values.
             antialias (bool, optional): If True, will apply a Gaussian filter
@@ -1027,6 +1033,18 @@ class Volume:
         Returns:
             Volume: Volume resampled to the target voxel spacing.
         """
+        if spacing is None and in_plane_spacing is None and slice_spacing is None:
+            raise ValueError('must provide either spacing, in_plane_spacing, or slice_spacing')
+        if spacing is not None:
+            if in_plane_spacing is not None or slice_spacing is not None:
+                raise ValueError('cannot provide spacing with in_plane_spacing or slice_spacing')
+        else:
+            spacing = self.geometry.spacing.clone()
+            if in_plane_spacing is not None:
+                spacing[self.geometry.in_plane_directions] = in_plane_spacing
+            if slice_spacing is not None:
+                spacing[self.geometry.slice_direction] = slice_spacing
+
         target = self.geometry.resample(spacing)
         return self.resample_like(target, mode=mode, padding_mode=padding_mode, antialias=antialias)
 
@@ -1120,6 +1138,73 @@ class Volume:
             target = inverted.convert(space='world') @ target
 
         return self.new(interpolated, target)
+
+    def pool(self,
+        scale: int = 2,
+        mode: str = 'mean',
+        spacing_ratio_thresh: float = None) -> Volume:
+        """
+        Pool the voxel data with a sliding window.
+
+        By default, this will pool over all dimensions, but it can be conditionally
+        disabled for the slice dimension based on the ratio of slice vs in-plane spacing, 
+        i.e. the value of `geometry.spacing_ratio`. For example, if the slice spacing is
+        `spacing_ratio_thresh` times greater than the in-plane spacing, the slice dimension
+        will not be pooled. Mind that if the resulting pooled volume has a slice spacing
+        less than the in-plane spacing, it will be resampled to an isotropic resolution.
+
+        There is no analogous `unpool` method because there is complexity in determining
+        the desired unpooling strategy. To return to the original geometry, instead use
+        the `resample_like` method. If no reference geometry is available, just use
+        the `reshape` method to upsample.
+
+        Args:
+            scale (int, optional): The size of the pooling window. Defaults to 2.
+            mode (str, optional): Pooling mode - can be 'mean' or 'max'. Defaults to 'mean'.
+            spacing_ratio_thresh (float, optional): Slice spacing ration that determines
+                whether the slice dimension is pooled. This is disabled by default.
+
+        Returns:
+            Volume: Pooled volume.
+        """
+
+        # dowsample factors for each dimension
+        factors = [1 if d == 1 else scale for d in self.baseshape]
+
+        # check if we should pool the slice dimension based on the spacing ratio threshold
+        spacing_ratio = self.geometry.spacing_ratio
+        slice_dim_pooling = spacing_ratio_thresh is None or spacing_ratio < spacing_ratio_thresh
+
+        if not slice_dim_pooling:
+            factors[self.geometry.slice_direction] = 1
+
+        # apply the appropriate pooling operation
+        if mode == 'max':
+            func = torch.nn.functional.max_pool3d
+        elif mode == 'mean':
+            func = torch.nn.functional.avg_pool3d
+        else:
+            raise ValueError(f'unknown pooling mode \'{mode}\'')
+
+        pooled_tensor = func(self.tensor, factors, ceil_mode=True)
+
+        # adjust the geometry based on the pooling factors
+        shift = [0.5 * (f - 1) for f in factors]
+        adjusted = self.geometry.shift(shift, space='voxel').scale(factors, space='voxel')
+        pooled = self.new(pooled_tensor, vx.AcquisitionGeometry(pooled_tensor.shape[1:], adjusted))
+
+        # if the slice dimension was not pooled and the resulting slice spacing
+        # is less than the in-plane spacing, we need to resample the slice dimension
+        if not slice_dim_pooling and spacing_ratio < scale:
+            spacing = pooled.geometry.spacing.clone()
+            spacing[self.geometry.slice_direction] = spacing[self.geometry.in_plane_directions].mean()
+            pooled = pooled.resample(spacing, padding_mode='border')
+
+        # sanity check
+        if pooled.geometry.spacing_ratio < 0.99:
+            raise ValueError('unexpected spacing ratio after pooling operation')
+
+        return pooled
 
     # -------------------------------------------------------------------------
     # image filtering and statistical normalization

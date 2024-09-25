@@ -58,6 +58,12 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self._baseshape
 
+    def numel(self) -> int:
+        """
+        Number of baseshape elements in the acquisition volume.
+        """
+        return self.baseshape.numel()
+
     @vx.caching.cached
     def spacing(self) -> torch.Tensor:
         """
@@ -99,6 +105,13 @@ class AcquisitionGeometry(vx.AffineMatrix):
         return self.spacing[self.in_plane_directions]
 
     @vx.caching.cached
+    def spacing_ratio(self) -> torch.Tensor:
+        """
+        Ratio of slice spacing to in-plane spacing.
+        """
+        return self.slice_spacing / self.in_plane_spacing.mean()
+
+    @vx.caching.cached
     def orientation(self) -> Orientation:
         """
         Anatomical orientation of the voxel coordinate system.
@@ -129,9 +142,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Returns:
             AcquisitionGeometry: The shifted geometry.
         """
-        trf = torch.eye(4, device=self.device)
-        trf[:3, 3] = torch.as_tensor(delta, device=self.device)
-        matrix = trf @ self.tensor if vx.Space(space) =='world' else self.tensor @ trf
+        trf = vx.affine.translation_matrix(torch.as_tensor(delta, device=self.device))
+        matrix = trf @ self if vx.Space(space) =='world' else self @ trf
         geometry = AcquisitionGeometry(self.baseshape, matrix,
                                        slice_direction=self._explicit_slice_direction)
         return geometry
@@ -158,6 +170,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
     def rotate(self,
         rotation: torch.Tensor,
         space: vx.Space,
+        corner: bool = True,
         degrees: bool = True) -> AcquisitionGeometry:
         """
         Rotate the acquisition geometry.
@@ -166,6 +179,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
             rotation (Tensor): Rotation angles (x, y, z). If `degrees` is True, the
                 angles are in degrees, otherwise they are in radians.
             space (Space): The space in which to apply the rotation.
+            corner (bool, optional): Whether to rotate around the image corner or center. Only
+                applicable when the space is 'voxel'. Defaults to True.
             degrees (bool, optional): Whether the angles are defined as degrees or,
                 alternatively, as radians.
 
@@ -174,7 +189,14 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         rotation = torch.as_tensor(rotation, device=self.device)
         trf = vx.affine.angles_to_rotation_matrix(rotation, degrees=degrees)
-        matrix = trf @ self if vx.Space(space) =='world' else self @ trf
+        if vx.Space(space) == 'world':
+            matrix = trf @ self
+        elif corner:
+            center = (torch.tensor(self.baseshape, device=self.device) - 1) / 2
+            trf = vx.affine.translation_matrix(center) @ trf @ vx.affine.translation_matrix(-center)
+            matrix = self @ trf
+        else:
+            matrix = self @ trf
         geometry = AcquisitionGeometry(self.baseshape, matrix,
                                        slice_direction=self._explicit_slice_direction)
         return geometry
@@ -255,6 +277,26 @@ class AcquisitionGeometry(vx.AffineMatrix):
                                           slice_direction=self.geometry._explicit_slice_direction)
         return reshaped
 
+    def reshape(self, baseshape: torch.Size) -> AcquisitionGeometry:
+        """
+        Modify the spatial extent of the volume geometry, cropping or padding around the
+        center image to fit a given **baseshape**.
+
+        This method is symmetric in that performing a reverse reshape operation
+        will always yeild the original geometry.
+
+        args:
+            baseshape (Size): Target spatial (3D) shape.
+        
+        returns:
+            AcquisitionGeometry: Reshaped geometry.
+        """
+        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
+        reshaped = vx.AcquisitionGeometry(baseshape=baseshape,
+                                          matrix=self.geometry.shift(shift, space='voxel'),
+                                          slice_direction=self.geometry._explicit_slice_direction)
+        return reshaped
+
     def bounds(self, margin: float | torch.Tensor = None) -> vx.Mesh:
         """
         Compute a box mesh enclosing the bounds of the grid.
@@ -277,7 +319,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         # build the world-space bounding box mesh
         mesh = vx.mesh.construct_box_mesh(minc, maxc)
-        return mesh.transform(self.geometry)
+        return mesh.transform(self)
 
     def fit_to_bounds(self,
         bounds: vx.Mesh,

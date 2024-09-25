@@ -216,6 +216,23 @@ class AffineVolumeTransform(AffineMatrix):
         return AffineVolumeTransform(affine, space, source, target)
 
 
+def translation_matrix(translation: torch.Tensor) -> AffineMatrix:
+    """
+    Compute a 3D translation matrix from translation vector.
+
+    Args:
+        translation (Tensor): Translation vector.
+    
+    Returns:
+        AffineMatrix: Translation affine matrix.
+    """
+    if translation.shape != (3,):
+        raise ValueError('Translation vector must have a shape of (3,).')
+    matrix = torch.eye(4, dtype=torch.float64, device=translation.device)
+    matrix[:3, 3] = translation
+    return AffineMatrix(matrix)
+
+
 def angles_to_rotation_matrix(
     rotation: torch.Tensor,
     degrees: bool = True) -> AffineMatrix:
