@@ -260,3 +260,153 @@ def angles_to_rotation_matrix(
     matrix = rx @ ry @ rz
 
     return AffineMatrix(matrix.to(rotation.device))
+
+
+def compose_affine(
+    translation : torch.Tensor = None,
+    rotation : torch.Tensor = None,
+    scale : torch.Tensor = None,
+    shear : torch.Tensor = None,
+    degrees : bool = True,
+    device : torch.device = None) -> AffineMatrix:
+    """
+    Composes an affine matrix from a set of translation, rotation, scale,
+    and shear transform components.
+
+    Args:
+        translation (Tensor, optional): Translation vector.
+        rotation (Tensor, optional): Rotation angles.
+        scale (Tensor, optional): Scaling factors.
+        shear (Tensor, optional): Shearing factors.
+        degrees (bool, optional): Whether the rotation angles are in degrees.
+        device (device, optional): Device of the generated matrix.
+
+    Returns:
+        AffineMatrix: Composed affine matrix.
+    """
+    # check translation
+    translation = torch.zeros(3) if translation is None else torch.as_tensor(translation)
+    if len(translation) != 3:
+        raise ValueError(f'translation must be of shape (3,)')
+
+    # check rotation angles
+    rotation = torch.zeros(3) if rotation is None else torch.as_tensor(rotation)
+    if rotation.ndim == 0 or rotation.ndim != 0 and rotation.shape[0] != 3:
+        raise ValueError(f'rotation must be of shape (3,)')
+
+    # check scaling factor
+    scale = torch.ones(3) if scale is None else torch.as_tensor(scale)
+    if scale.ndim == 0:
+        scale = scale.repeat(3)
+    if scale.shape[0] != 3:
+        raise ValueError(f'scale must be of size (3,)')
+
+    # check shearing
+    shear = torch.zeros(3) if shear is None else torch.as_tensor(shear)
+    if shear.ndim == 0:
+        shear = shear.view(1)
+    if shear.shape[0] != 3:
+        raise ValueError(f'shear must be of shape (3,)')
+
+    # start from translation
+    T = torch.eye(4, dtype=torch.float64)
+    T[:3, -1] = translation
+
+    # rotation matrix
+    R = torch.eye(4, dtype=torch.float64)
+    R[:3, :3] = angles_to_rotation_matrix(rotation, degrees=degrees)[:3, :3]
+
+    # scaling
+    Z = torch.diag(torch.cat([scale, torch.ones(1, dtype=torch.float64)]))
+
+    # shear matrix
+    S = torch.eye(4, dtype=torch.float64)
+    S[0][1] = shear[0]
+    S[0][2] = shear[1]
+    S[1][2] = shear[2]
+
+    # compose component matrices
+    matrix = T @ R @ Z @ S
+
+    return AffineMatrix(torch.as_tensor(matrix, dtype=torch.float32, device=device))
+
+
+def random_affine(
+    max_translation: float = 0,
+    max_rotation: float = 0,
+    max_scaling: float = 0,
+    device: torch.device = None) -> AffineMatrix:
+    """
+    Generate a random affine transformation matrix.
+
+    Args:
+        max_translation (float, optional): Maximum translation in each direction.
+        max_rotation (float, optional): Maximum rotation in each direction.
+        max_scaling (float, optional): Maximum fractional scaling in each direction.
+        device (device, optional): Device of the generated affine matrix.
+
+    Returns:
+        AffineMatrix: Random affine matrix.
+    """
+    translation_range = sorted([-max_translation, max_translation])
+    translation = torch.distributions.uniform.Uniform(translation_range).sample((3,))
+
+    rotation_range = sorted([-max_rotation, max_rotation])
+    rotation = torch.distributions.uniform.Uniform(rotation_range).sample((3,))
+
+    if max_scaling < 0:
+        raise ValueError('max_scaling must be a positive value')
+    scale = (1 + torch.rand(3) * max_scaling) ** torch.randn(3).sign()
+
+    aff = compose_affine(
+        translation=translation,
+        rotation=rotation,
+        scale=scale,
+        device=device)
+    return aff
+
+
+def least_squares_alignment(
+    source: torch.Tensor | vx.Mesh,
+    target: torch.Tensor | vx.Mesh,
+    weights: torch.Tensor = None,
+    regularization: float = 1e-6) -> AffineMatrix:
+    """
+    Compute an affine least squares alignment between two 3D point sets.
+
+    Args:
+        source (Tensor or Mesh): Source point set.
+        target (Tensor or Mesh): Target point set.
+        weights (Tensor, optional): Weights for each point in the source set.
+        regularization (float, optional): Regularization scale. Default is 1e-6.
+    
+    Returns:
+        AffineMatrix: Affine alignment matrix.
+    """
+    if isinstance(source, vx.Mesh):
+        source = source.vertices
+    if isinstance(target, vx.Mesh):
+        target = target.vertices
+
+    # check input shapes
+    assert source.shape == target.shape, 'source and target points must have the same shape'
+    assert source.shape[1] == 3, 'source and target must be 3D point sets'
+
+    # configure the weight matrix
+    if weights is not None:
+        assert weights.shape[0] == source.shape[0], 'weights must match the number of points'
+        # TODO: ensure that weights are positive
+        W = torch.diag(weights)
+    else:
+        W = torch.eye(len(source), device=source.device, dtype=source.dtype)
+
+    #  extend source to shape (N, 4)
+    source = torch.cat([source, torch.ones(source.shape[0], 1, device=source.device)], dim=1)
+
+    # init regularization matrix
+    R = regularization * torch.eye(4, device=source.device, dtype=source.dtype)
+
+    # compute weighted least squared estimator
+    M = (source.T @ W @ source + R).inverse() @ (source.T @ W @ target)
+
+    return vx.AffineMatrix(M.T)

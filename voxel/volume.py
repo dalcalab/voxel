@@ -751,16 +751,17 @@ class Volume:
     def centroids(self, space: vx.Space) -> torch.Tensor:
         """
         Compute the centroids (centers of mass) for each volume channel.
+        All negative values are clamped to zero before computing the centroids.
 
         Args:
             space (Space): The coordinate space of computed centroids.
 
         Returns:
-            Tensor: Coordinates of shape (C, 3).
+            Tensor: Per-channel coordinates of shape (C, 3).
         """
         clamped_tensor = self.tensor.clamp(min=0).float()
 
-        # 
+        # compute the centroids with a differentiable coordinate weighting
         coord = lambda a: (a * torch.arange(a.shape[-1], device=self.device)).sum(-1) / (a.sum(-1) + 1e-6)
         z_mean = clamped_tensor.mean(-1)
         x = coord(z_mean.mean(-1))
@@ -768,9 +769,9 @@ class Volume:
         z = coord(clamped_tensor.mean(-2).mean(-2))
         centroids = torch.stack([x, y, z], dim=-1)
 
+        # transform to world-space if necessary
         if vx.Space(space) == 'world':
             centroids = self.matrix.transform(centroids)
-
         return centroids
 
     def crop(self, cropping: tuple | vx.Mesh, margin: float | torch.Tensor = None) -> Volume:
