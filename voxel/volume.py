@@ -774,7 +774,7 @@ class Volume:
 
         # transform to world-space if necessary
         if vx.Space(space) == 'world':
-            centroids = self.matrix.transform(centroids)
+            centroids = self.geometry.transform(centroids)
         return centroids
 
     def crop(self, cropping: tuple | vx.Mesh, margin: float | torch.Tensor = None) -> Volume:
