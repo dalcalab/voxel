@@ -58,6 +58,20 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self._baseshape
 
+    def new(self, baseshape: torch.Size) -> AcquisitionGeometry:
+        """
+        Create a new geometry with a different spatial shape but the same
+        affine transform and slice direction.
+
+        Args:
+            baseshape (Size): New spatial shape.
+
+        Returns:
+            AcquisitionGeometry: New geometry with the specified shape.
+        """
+        return AcquisitionGeometry(baseshape, self.tensor,
+                                   slice_direction=self._explicit_slice_direction)
+
     def numel(self) -> int:
         """
         Number of baseshape elements in the acquisition volume.
@@ -111,13 +125,6 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self.slice_spacing / self.in_plane_spacing.mean()
 
-    @vx.caching.cached
-    def orientation(self) -> Orientation:
-        """
-        Anatomical orientation of the voxel coordinate system.
-        """
-        return Orientation(self)
-
     def is_isotropic(self, rtol: float = 1e-2) -> bool:
         """
         Determine if voxel spacing is isotropic within a relative tolerance.
@@ -130,6 +137,77 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         mean = self.in_plane_spacing.mean()
         return self.spacing.allclose(mean, atol=0, rtol=rtol)
+
+    @vx.caching.cached
+    def orientation(self) -> Orientation:
+        """
+        Anatomical orientation of the voxel coordinate system.
+        """
+        return Orientation(self)
+
+    def world_to_voxel_units(self, units: torch.Tensor) -> torch.Tensor:
+        """
+        Convert world units to voxel units.
+
+        Args:
+            units (Tensor): Units of size $(1,)$ or $(3,)$ or $(3, 2)$ in world space.
+
+        Returns:
+            Tensor: Units in voxel space.
+        """
+        units = torch.as_tensor(units, device=self.device).float()
+        if units.ndim == 0:
+            units = units.repeat(3)
+        spacing = self.spacing.unsqueeze(1) if units.ndim == 2 else self.spacing
+        return units[self.orientation.dims] / spacing
+
+    def voxel_to_world_units(self, units: torch.Tensor) -> torch.Tensor:
+        """
+        Convert voxel units to world units.
+
+        Args:
+            units (Tensor): Units of size $(1,)$ or $(3,)$ or $(3, 2)$ in voxel space.
+
+        Returns:
+            Tensor: Units in world space.
+        """
+        return (self.spacing * units)[self.orientation.dims.argsort()]
+
+    def conform_units(self,
+        units: torch.Tensor,
+        source: vx.Space,
+        target: vx.Space,
+        num: int = None) -> torch.Tensor:
+        """
+        Conform units to the voxel space. If the input space is 'world', the units are
+        converted to world space. Otherwise, the units are just conformed to length 3.
+
+        Args:
+            units (Tensor): Units of size $(1,)$ or $(3,)$ or $(3, N)$
+            source (Space): Space of the input units.
+            target (Space): Space to convert the units to.
+            num (int, optional): Number of units $N$ represented in the second dimension
+                of the output tensor. If None, the output tensor will have shape $(3,)$.
+        
+        Returns:
+            Tensor: Units of size $(3, N)$ or $(3,)$ in voxel space.
+        """
+        units = torch.as_tensor(units, device=self.device).float()
+
+        if vx.Space(source) == 'world' and vx.Space(target) == 'voxel':
+            units = self.world_to_voxel_units(units)
+        elif vx.Space(source) == 'voxel' and vx.Space(target) == 'world':
+            units = self.voxel_to_world_units(units)
+
+        if units.ndim == 0:
+            units = units.repeat((3, num)) if num is not None else units.repeat(3)
+        elif units.shape == (3,) and num is not None:
+            units = units.unsqueeze(1).repeat(1, 2)
+        if num is not None and units.shape != (3, num):
+            raise ValueError(f'tensor must be of size (3, {num}) or (3,) or (1,), got {units.shape}')
+        if num is None and units.shape != (3,):
+            raise ValueError(f'tensor must be of size (3,) or (1,), got {units.shape}')
+        return units
 
     def shift(self, delta: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
         """
@@ -170,7 +248,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
     def rotate(self,
         rotation: torch.Tensor,
         space: vx.Space,
-        corner: bool = True,
+        corner: bool = False,
         degrees: bool = True) -> AcquisitionGeometry:
         """
         Rotate the acquisition geometry.
@@ -191,7 +269,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         trf = vx.affine.angles_to_rotation_matrix(rotation, degrees=degrees)
         if vx.Space(space) == 'world':
             matrix = trf @ self
-        elif corner:
+        elif not corner:
             center = (torch.tensor(self.baseshape, device=self.device) - 1) / 2
             trf = vx.affine.translation_matrix(center) @ trf @ vx.affine.translation_matrix(-center)
             matrix = self @ trf
@@ -272,38 +350,52 @@ class AcquisitionGeometry(vx.AffineMatrix):
             AcquisitionGeometry: Reshaped geometry.
         """
         shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
-        reshaped = vx.AcquisitionGeometry(baseshape=baseshape,
-                                          matrix=self.geometry.shift(shift, space='voxel'),
-                                          slice_direction=self.geometry._explicit_slice_direction)
-        return reshaped
+        return self.shift(shift, space='voxel').new(baseshape)
 
-    def reshape(self, baseshape: torch.Size) -> AcquisitionGeometry:
+    def pad(self, margin: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
         """
-        Modify the spatial extent of the volume geometry, cropping or padding around the
-        center image to fit a given **baseshape**.
-
-        This method is symmetric in that performing a reverse reshape operation
-        will always yeild the original geometry.
+        Pad the spatial extent of the volume geometry by a given margin. Note that
+        a negative margin value will result in trimming (cropping).
 
         args:
-            baseshape (Size): Target spatial (3D) shape.
-        
-        returns:
-            AcquisitionGeometry: Reshaped geometry.
-        """
-        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
-        reshaped = vx.AcquisitionGeometry(baseshape=baseshape,
-                                          matrix=self.geometry.shift(shift, space='voxel'),
-                                          slice_direction=self.geometry._explicit_slice_direction)
-        return reshaped
+            margin (float or Tensor, optional): Delta of specified units to
+                pad (or crop) the volume by in each direction. Can be of size
+                $(1,)$, $(3,)$, or $(3, 2)$.
+            space (Space): The space of the margin, either 'voxel' or 'world'.
 
-    def bounds(self, margin: float | torch.Tensor = None) -> vx.Mesh:
+        returns:
+            AcquisitionGeometry: Reshaped volume geometry.
+        """
+        margin = self.conform_units(margin, space, 'voxel', 2).round().int()
+        new_shape = torch.tensor(self.baseshape) + margin.sum(-1)
+        return self.shift(-margin[:, 0], space='voxel').new(new_shape)
+
+    def trim(self, margin: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
+        """
+        Trim the spatial extent of the volume geometry by a given margin. This is
+        equivalent to padding with negative margin values.
+
+        args:
+            margin (float or Tensor, optional): Delta of specified units to
+                trim the volume by in each direction. Can be of size $(1,)$,
+                $(3,)$, or $(3, 2)$.
+            space (Space): The space of the margin, either 'voxel' or 'world'.
+
+        returns:
+            AcquisitionGeometry: Reshaped volume geometry.
+        """
+        return self.pad(-margin, space)
+
+    def bounds(self,
+        margin: float | torch.Tensor = None,
+        space: vx.Space = 'world') -> vx.Mesh:
         """
         Compute a box mesh enclosing the bounds of the grid.
 
         Args:
-            margin (float or Tensor, optional): Margin (in world units) to expand
-                the cropping boundary. Can be a positive or negative delta.
+            margin (float or Tensor, optional): Margin to expand the cropping boundary.
+                Can be a positive or negative delta.
+            space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
 
         Returns:
             Mesh: Bounding box mesh in world-space coordinates.
@@ -313,9 +405,9 @@ class AcquisitionGeometry(vx.AffineMatrix):
         
         # expand (or shrink) margin around border
         if margin is not None:
-            margin = (margin / self.spacing).round().int().view(-1, 3).expand(2, 3)
-            minc -= margin[0]
-            maxc += margin[1]
+            margin = self.conform_units(margin, space, 'voxel', 2)
+            minc -= margin[:, 0]
+            maxc += margin[:, 1]
 
         # build the world-space bounding box mesh
         mesh = vx.mesh.construct_box_mesh(minc, maxc)
@@ -323,21 +415,30 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def fit_to_bounds(self,
         bounds: vx.Mesh,
-        margin: float | torch.Tensor = None) -> AcquisitionGeometry:
+        margin: float | torch.Tensor = None,
+        space: vx.Space = 'world') -> AcquisitionGeometry:
         """
+        Fit the geometry to the bounds of a world-space mesh.
+
+        Args:
+            bounds (Mesh): Mesh defining the bounds to fit to.
+            margin (float or Tensor, optional): Margin to expand the bounding box
+                around the bounds. Can be a positive or negative delta.
+            space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
+
+        Returns:
+            AcquisitionGeometry: Reshaped geometry.
         """
         points = self.inverse().transform(bounds.vertices.detach())
         minc = points.amin(0).floor().int()
         maxc = points.amax(0).ceil().int() + 1
 
         if margin is not None:
-            margin = (margin / self.spacing).round().int().view(-1, 3).expand(2, 3)
-            minc -= margin[0]
-            maxc += margin[1]
+            margin = self.conform_units(margin, space, 'voxel', 2)
+            minc -= margin[:, 0]
+            maxc += margin[:, 1]
 
-        geometry = AcquisitionGeometry(maxc - minc, self.shift(minc, 'voxel'),
-                                       slice_direction=self._explicit_slice_direction)
-        return geometry
+        return self.shift(minc, 'voxel').new(maxc - minc)
 
     def voxel_to_local(self) -> vx.AffineMatrix:
         """
@@ -527,6 +628,19 @@ class Orientation:
             Tensor: 3D integer mapping of dimensions.
         """
         return self.dims.argsort()[cast_orientation(target).dims]
+
+    def view(self, dim: int) -> str:
+        """
+        Get the name of the view plane (axial, coronal, sagittal) for a given dimension.
+
+        Args:
+            dim (int): Dimension index.
+        
+        Returns:
+            str: View plane name.
+        """
+        views = ['axial', 'coronal', 'sagittal']
+        return views[vx.Orientation('SAR').dim_map(self)[dim]]
 
 
 def cast_orientation(obj) -> Orientation:

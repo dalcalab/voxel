@@ -712,7 +712,8 @@ class Volume:
 
     def bounds(self,
         nonzero: bool = False,
-        margin: float | torch.Tensor = None) -> vx.Mesh:
+        margin: float | torch.Tensor = None,
+        space: vx.Space = 'world') -> vx.Mesh:
         """
         Compute a box mesh enclosing the bounds of the volume grid or the non-zero
         voxels in the image.
@@ -720,8 +721,9 @@ class Volume:
         Args:
             nonzero (bool): If True, compute the bounds around all non-zero voxels,
                 otherwise use the extent of the image grid.
-            margin (float or Tensor, optional): Margin (in world units) to expand
-                the cropping boundary. Can be a positive or negative delta.
+            margin (float or Tensor, optional): Margin to expand the cropping boundary.
+                Can be a positive or negative delta.
+            space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
 
         Returns:
             Mesh: Bounding box mesh in world-space coordinates.
@@ -741,8 +743,9 @@ class Volume:
         
         # expand (or shrink) margin around border
         if margin is not None:
-            min_point -= margin / self.geometry.spacing
-            min_point += margin / self.geometry.spacing
+            margin = self.conform_units(margin, space, 'world', 2)
+            minc -= margin[:, 0]
+            maxc += margin[:, 1]
 
         # build the world-space bounding box mesh
         mesh = vx.mesh.construct_box_mesh(min_point, max_point)
@@ -1065,25 +1068,39 @@ class Volume:
         """
         return self.resample_like(self.geometry.reshape(baseshape), mode='nearest')
 
-    def pad(self, delta: torch.Tensor) -> Volume:
+    def pad(self, delta: float | torch.Tensor, space: vx.Space) -> Volume:
         """
         Pad the spatial extent of the volume by a given delta. Note that
-        a negative delta value will result in cropping.
+        a negative delta value will result in trimming (cropping).
 
         args:
-            delta (float or Tensor, optional): 3D delta (in world units) to
-                pad (or crop) the spatial extent in each direction.
+            delta (float or Tensor, optional): Delta of specified units to
+                pad (or crop) the volume by in each direction. Can be of size
+                $(1,)$, $(3,)$, or $(3, 2)$.
+            space (Space): The coordinate space of the delta values, either
+                'voxel' or 'world'.
 
         returns:
             Volume: Reshaped volume instance.
         """
-        curr_shape = torch.tensor(self.baseshape)
-        new_shape = curr_shape + (2 * delta / self.geometry.spacing).round().int()
-        shift = (curr_shape - new_shape) // 2
-        target = vx.AcquisitionGeometry(baseshape=new_shape,
-                                        matrix=self.geometry.shift(shift, space='voxel'),
-                                        slice_direction=self.geometry._explicit_slice_direction)
-        return self.resample_like(target, mode='nearest')
+        return self.resample_like(self.geometry.pad(delta, space), mode='nearest')
+
+    def trim(self, delta: float | torch.Tensor, space: vx.Space) -> Volume:
+        """
+        Trim the spatial extent of the volume by a given delta. This is
+        equivalent to padding with negative delta values.
+
+        args:
+            delta (float or Tensor, optional): Delta of specified units to
+                trim the volume by in each direction. Can be of size $(1,)$,
+                $(3,)$, or $(3, 2)$.
+            space (Space): The coordinate space of the delta values, either
+                'voxel' or 'world'.
+
+        returns:
+            Volume: Reshaped volume instance.
+        """
+        return self.pad(-delta, space)
 
     def transform(self,
         transform: vx.AffineVolumeTransform | vx.AffineMatrix,
@@ -1225,6 +1242,18 @@ class Volume:
         """
         scaled = torch.as_tensor(sigma, device=self.device) / self.geometry.spacing.to(self.device)
         return self.new(vx.filters.gaussian_blur(self.tensor, scaled, truncate=truncate))
+
+    def dilate(self, iterations: int = 1) -> Volume:
+        """
+        Dilate the volume.
+
+        Args:
+            iterations (int, optional): Number of dilation iterations.
+
+        Returns:
+            Volume: Dilated volume of the same data type.
+        """
+        return self.new(vx.filters.dilate(self.tensor, iterations))
 
 
 def _cast_volume_as_tensor(other: object) -> object:

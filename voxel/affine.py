@@ -349,10 +349,10 @@ def random_affine(
         AffineMatrix: Random affine matrix.
     """
     translation_range = sorted([-max_translation, max_translation])
-    translation = torch.distributions.uniform.Uniform(translation_range).sample((3,))
+    translation = torch.distributions.uniform.Uniform(*translation_range).sample((3,))
 
     rotation_range = sorted([-max_rotation, max_rotation])
-    rotation = torch.distributions.uniform.Uniform(rotation_range).sample((3,))
+    rotation = torch.distributions.uniform.Uniform(*rotation_range).sample((3,))
 
     if max_scaling < 0:
         raise ValueError('max_scaling must be a positive value')

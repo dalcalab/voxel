@@ -118,3 +118,40 @@ def gaussian_blur(
         blurred = blurred.squeeze(0)
 
     return blurred
+
+
+def dilate(image: torch.Tensor, iterations: int = 1, batched: bool = False) -> torch.Tensor:
+    """
+    Apply a binary dilation operation to a data grid.
+
+    Args:
+        image (Tensor): An image tensor with preceding channel dimensions. A
+            batch dimension can be included by setting `batched=True`.
+        iterations (int, optional): The number of dilation iterations.
+        batched (bool, optional): If True, assume image has a batch dimension.
+
+    Returns:
+        Tensor: The dilated tensor with the same shape as the input tensor.
+    """
+    ndim = image.ndim - (2 if batched else 1)
+
+    # sanity check for common mistake
+    if ndim == 4 and not batched:
+        raise ValueError(f'dilate input has {image.ndim} dims, '
+                          'but batched option is False')
+
+    dilated = image.float()
+    if not batched:
+        dilated = dilated.unsqueeze(0)
+
+    kernel_shape = [3] * ndim
+    kernel = torch.ones((1, 1, *kernel_shape), device=dilated.device, dtype=dilated.dtype)
+
+    conv = getattr(torch.nn.functional, f'conv{ndim}d')
+    for _ in range(iterations):
+        dilated = conv(dilated, kernel, groups=image.shape[0], padding='same')
+
+    if not batched:
+        dilated = dilated.squeeze(0)
+
+    return (dilated > 0).to(image.dtype)
