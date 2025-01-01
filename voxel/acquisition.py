@@ -273,28 +273,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
         reshaped = vx.AcquisitionGeometry(baseshape=baseshape,
-                                          matrix=self.geometry.shift(shift, space='voxel'),
-                                          slice_direction=self.geometry._explicit_slice_direction)
-        return reshaped
-
-    def reshape(self, baseshape: torch.Size) -> AcquisitionGeometry:
-        """
-        Modify the spatial extent of the volume geometry, cropping or padding around the
-        center image to fit a given **baseshape**.
-
-        This method is symmetric in that performing a reverse reshape operation
-        will always yeild the original geometry.
-
-        args:
-            baseshape (Size): Target spatial (3D) shape.
-        
-        returns:
-            AcquisitionGeometry: Reshaped geometry.
-        """
-        shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
-        reshaped = vx.AcquisitionGeometry(baseshape=baseshape,
-                                          matrix=self.geometry.shift(shift, space='voxel'),
-                                          slice_direction=self.geometry._explicit_slice_direction)
+                                          matrix=self.shift(shift, space='voxel'),
+                                          slice_direction=self._explicit_slice_direction)
         return reshaped
 
     def bounds(self, margin: float | torch.Tensor = None) -> vx.Mesh:
