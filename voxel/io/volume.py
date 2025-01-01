@@ -107,10 +107,13 @@ class NiftiArrayIO(IOProtocol):
             Volume: The loaded volume.
         """
         nii = self.nib.load(filename)
-        nii_np = np.asanyarray(nii.dataobj)
-        if nii_np.dtype == np.uint16:
-            nii_np = nii_np.astype(np.int16)
-        features = torch.from_numpy(nii_np)
+        array = np.asanyarray(nii.dataobj)
+
+        # not supported by torch
+        if array.dtype == np.uint16:
+            array = array.astype(np.int32)
+
+        features = torch.from_numpy(array)
         if features.ndim == 4:
             features = features.moveaxis(-1, 0)
 
