@@ -743,9 +743,9 @@ class Volume:
         
         # expand (or shrink) margin around border
         if margin is not None:
-            margin = self.conform_units(margin, space, 'world', 2)
-            minc -= margin[:, 0]
-            maxc += margin[:, 1]
+            margin = self.geometry.conform_units(margin, space, 'world', 2)
+            min_point -= margin[:, 0]
+            max_point += margin[:, 1]
 
         # build the world-space bounding box mesh
         mesh = vx.mesh.construct_box_mesh(min_point, max_point)
@@ -1281,14 +1281,15 @@ def volume_grid(
             allocate the grid data.
 
     Returns:
-        Tensor: _description_
+        Tensor: Grid volume tensor.
     """
     ranges = [torch.arange(s, dtype=torch.float32, device=device) for s in baseshape]
     grid = torch.stack(torch.meshgrid(*ranges, indexing='ij'), dim=-1)
     if transform:
         grid = transform.transform(grid)
     if localshape is not None:
-        grid = (grid / (torch.tensor(localshape, device=device) - 1) * 2 - 1).flip(-1)
+        div = torch.tensor(localshape).maximum(torch.tensor(2)).to(grid.device) - 1
+        grid = (grid / div * 2 - 1).flip(-1)
     return grid
 
 
