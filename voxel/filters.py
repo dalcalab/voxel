@@ -144,8 +144,12 @@ def dilate(image: torch.Tensor, iterations: int = 1, batched: bool = False) -> t
     if not batched:
         dilated = dilated.unsqueeze(0)
 
-    kernel_shape = [3] * ndim
-    kernel = torch.ones((1, 1, *kernel_shape), device=dilated.device, dtype=dilated.dtype)
+    kernel = torch.zeros([3] * ndim, device=dilated.device, dtype=dilated.dtype)
+    for dim in range(ndim):
+        slices = [slice(None)] * ndim
+        slices[dim] = 1
+        kernel[tuple(slices)] = 1
+    kernel = kernel.view(1, 1, *kernel.shape)
 
     conv = getattr(torch.nn.functional, f'conv{ndim}d')
     for _ in range(iterations):
