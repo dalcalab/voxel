@@ -178,16 +178,16 @@ class NiftiArrayIO(IOProtocol):
 
         # set spatial and temporal spacing
         nii.header['pixdim'][:] = 1
-        nii.header['pixdim'][4] = 1 if ref is None else ref.channel_spacing
+        nii.header['pixdim'][4] = 1 if not matches_original else ref.channel_spacing
         nii.header['pixdim'][1:4] = spacing
 
         # set units - fallback to mm and seconds
         default = np.asarray(2, dtype=np.uint8) | np.asarray(8, dtype=np.uint8)
-        nii.header['xyzt_units'] = default if ref is None else ref.xyzt_units
+        nii.header['xyzt_units'] = default if not matches_original else ref.xyzt_units
 
         # geometry-specific header data
-        nii.set_sform(affine, 1 if ref is None else ref.sform_code)
-        nii.set_qform(affine, 1 if ref is None else ref.qform_code)
+        nii.set_sform(affine, 1 if not matches_original else ref.sform_code)
+        nii.set_qform(affine, 1 if not matches_original else ref.qform_code)
 
         # write
         self.nib.save(nii, filename)
