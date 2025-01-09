@@ -306,17 +306,36 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         return AcquisitionGeometry(baseshape[perm], self @ trf, slice_direction=slice_direction)
 
-    def resample(self, spacing: float | torch.Tensor) -> AcquisitionGeometry:
+    def resample(self,
+        spacing: float | torch.Tensor = None,
+        in_plane_spacing: float | torch.Tensor = None,
+        slice_spacing: float | torch.Tensor = None) -> AcquisitionGeometry:
         """
         Resample to a new voxel grid spacing.
 
         Args:
             spacing (float |Tensor): Target voxel spacing. An isotropic target
                 is assumed if a scalar is provided.
+            in_plane_spacing (float | Tensor): Target in-plane voxel spacing. Mutually
+                exclusive with the `spacing` argument.
+            slice_spacing (float | Tensor): Target slice spacing. Mutually exclusive
+                except with the `spacing` argument.
 
         Returns:
             AcquisitionGeometry: Resampled geometry.
         """
+        if spacing is None and in_plane_spacing is None and slice_spacing is None:
+            raise ValueError('must provide either spacing, in_plane_spacing, or slice_spacing')
+        if spacing is not None:
+            if in_plane_spacing is not None or slice_spacing is not None:
+                raise ValueError('cannot provide spacing with in_plane_spacing or slice_spacing')
+        else:
+            spacing = self.spacing.clone()
+            if in_plane_spacing is not None:
+                spacing[self.in_plane_directions] = in_plane_spacing
+            if slice_spacing is not None:
+                spacing[self.slice_direction] = slice_spacing
+
         if not torch.is_tensor(spacing):
             spacing = torch.tensor(spacing, dtype=torch.float32)
         if spacing.ndim == 0:

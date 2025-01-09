@@ -1037,19 +1037,8 @@ class Volume:
         Returns:
             Volume: Volume resampled to the target voxel spacing.
         """
-        if spacing is None and in_plane_spacing is None and slice_spacing is None:
-            raise ValueError('must provide either spacing, in_plane_spacing, or slice_spacing')
-        if spacing is not None:
-            if in_plane_spacing is not None or slice_spacing is not None:
-                raise ValueError('cannot provide spacing with in_plane_spacing or slice_spacing')
-        else:
-            spacing = self.geometry.spacing.clone()
-            if in_plane_spacing is not None:
-                spacing[self.geometry.in_plane_directions] = in_plane_spacing
-            if slice_spacing is not None:
-                spacing[self.geometry.slice_direction] = slice_spacing
-
-        target = self.geometry.resample(spacing)
+        target = self.geometry.resample(spacing=spacing, in_plane_spacing=in_plane_spacing,
+                                        slice_spacing=slice_spacing)
         return self.resample_like(target, mode=mode, padding_mode=padding_mode, antialias=antialias)
 
     def reshape(self, baseshape: torch.Size) -> Volume:
