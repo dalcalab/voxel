@@ -332,6 +332,45 @@ class Volume:
         """
         return self.new(self.tensor.exp())
 
+    def log(self) -> Volume:
+        """
+        Compute the natural logarithm of the volume features.
+
+        Returns:
+            Volume: A new log-transformed volume instance.
+        """
+        return self.new(self.tensor.log())
+
+    def sqrt(self) -> Volume:
+        """
+        Compute the square root of the volume features.
+
+        Returns:
+            Volume: A new square-rooted volume instance.
+        """
+        return self.new(self.tensor.sqrt())
+
+    def square(self) -> Volume:
+        """
+        Compute the square of the volume features.
+
+        Returns:
+            Volume: A new squared volume instance.
+        """
+        return self.new(self.tensor.square())
+
+    def pow(self, exponent: float) -> Volume:
+        """
+        Compute the power of the volume features.
+
+        Args:
+            exponent (float): The exponent value.
+
+        Returns:
+            Volume: A new powered volume instance.
+        """
+        return self.new(self.tensor.pow(exponent))
+
     def isnan(self) -> Volume:
         """
         Compute a mask of NaN values in the volume.
@@ -384,6 +423,38 @@ class Volume:
             Volume: A minimized volume instance.
         """
         return self.new(self.tensor.minimum(other.tensor))
+
+    def all(self, dim: int | None = None) -> Volume | torch.Tensor:
+        """
+        Check if all elements in the volume are True.
+
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
+
+        Returns:
+            Tensor or Volume: The all-True value(s) or volume.
+        """
+        reduced = self.tensor.all(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
+
+    def any(self, dim: int | None = None) -> Volume | torch.Tensor:
+        """
+        Check if any elements in the volume are True.
+
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
+
+        Returns:
+            Tensor or Volume: The any-True value(s) or volume.
+        """
+        reduced = self.tensor.any(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
 
     def zeros_like(self,
         channels: int | None = None,
@@ -556,6 +627,11 @@ class Volume:
             if indexing.shape[0] == 1 and self.num_channels > 1:
                 indexing = indexing.expand(self.num_channels, -1, -1, -1)
             return self.tensor[indexing]
+        elif isinstance(indexing, list):
+            # a list of indices should be treated as a list of channel reshuffling indices
+            if not all(isinstance(i, int) for i in indexing):
+                raise ValueError('channel list indexing must be a list of integers')
+            return self.new(self.tensor[indexing])
         # in all circumstances (ex: slicing tuple or bounding box), call
         # the crop function which actually returns a new volume
         return self.crop(indexing)
