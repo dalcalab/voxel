@@ -182,6 +182,17 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self.voxel_to_world_units(torch.tensor(self.baseshape, device=self.device))
 
+    def voxel_to_local_coordinates(self, coords: torch.Tensor) -> torch.Tensor:
+        """
+        Transform voxel coordiates to flipped local grid coordinates in
+        the range [-1, 1]. These local coordinates are used for grid sampling in torch.
+
+        Returns:
+            torch.Tensor: Transformed local coordinates.
+        """
+        shape = torch.tensor(self.baseshape).to(coords.device)
+        return ((2 * coords + 1) / shape - 1).flip(-1)
+
     def world_to_voxel_units(self, units: torch.Tensor) -> torch.Tensor:
         """
         Convert world units to voxel units.
@@ -499,20 +510,6 @@ class AcquisitionGeometry(vx.AffineMatrix):
             maxc += margin[:, 1]
 
         return self.shift(minc, 'voxel').reshape(maxc - minc, from_origin=True)
-
-    def voxel_to_local(self) -> vx.AffineMatrix:
-        """
-        Transform that converts voxel coordiates to flipped local grid coordinates in
-        the range [-1, 1]. These local coordinates are used for grid sampling in torch.
-
-        Returns:
-            AffineMatrix: Transformed local coordinates.
-        """
-        mat = torch.eye(4)
-        mat[:3, :3] *= 2 / (torch.tensor(self.baseshape) - 1)
-        mat[:3, -1] = -1
-        mat[[0, 2]] = mat[[2, 0]]
-        return vx.AffineMatrix(mat)
 
     def zeros_like(self,
         channels: int = 1,

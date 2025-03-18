@@ -437,7 +437,8 @@ class Volume:
         Returns:
             Tensor or Volume: The all-True value(s) or volume.
         """
-        reduced = self.tensor.all(dim=dim)
+        kwargs = {} if dim is None else {'dim': dim}
+        reduced = self.tensor.all(**kwargs)
         return self.new(reduced) if dim == 0 else reduced
 
     def any(self, dim: int | None = None) -> Volume | torch.Tensor:
@@ -453,7 +454,8 @@ class Volume:
         Returns:
             Tensor or Volume: The any-True value(s) or volume.
         """
-        reduced = self.tensor.any(dim=dim)
+        kwargs = {} if dim is None else {'dim': dim}
+        reduced = self.tensor.any(**kwargs)
         return self.new(reduced) if dim == 0 else reduced
 
     def zeros_like(self,
@@ -730,7 +732,8 @@ class Volume:
     def sample(self,
         points: torch.Tensor | vx.Mesh,
         space: vx.Space,
-        mode: str = 'linear') -> torch.Tensor:
+        mode: str = 'linear',
+        padding_mode: str = 'zeros') -> torch.Tensor:
         """
         Sample volume features at a set of points.
 
@@ -739,18 +742,32 @@ class Volume:
                 shape $(N, 3)$. If the input is a mesh, the vertex positions are used.
             space (Space): The coordinate space of the input points or mesh.
             mode (str, optional): The sampling mode, either 'linear' or 'nearest'.
+            padding_mode (str, optional): Padding mode for outside grid values.
 
         Returns:
             Tensor: The sampled features, with shape $(N, C)$.
         """
         if isinstance(points, vx.Mesh):
             points = points.vertices
+
+        # convert to local coordinate space
         if vx.Space(space) == 'world':
             points = self.geometry.inverse().transform(points)
-        points = self.geometry.voxel_to_local().transform(points)
-        grid = points.view(1, len(points), 1, 1, 3)
-        sampled = torch.nn.functional.grid_sample(self.tensor.unsqueeze(0), grid,
-            align_corners=True, mode=('bilinear' if mode == 'linear' else 'nearest'))
+        points = self.geometry.voxel_to_local_coordinates(points)
+
+        # sample the channels
+        sampled = torch.nn.functional.grid_sample(
+            self.tensor.float().unsqueeze(0),
+            points.view(1, len(points), 1, 1, 3),
+            align_corners=False,
+            mode=('bilinear' if mode == 'linear' else 'nearest'),
+            padding_mode=padding_mode)
+        
+        # if nearest neighbor sampling, convert back to original dtype
+        if mode == 'nearest':
+            sampled = sampled.type(self.dtype)
+
+        # remove batch and spatial dimensions
         return sampled.squeeze(dim=(0, 3, 4)).swapaxes(0, 1)
 
     def tesselate(self, threshold: float = 0.5, space: vx.Space = 'world') -> vx.Mesh:
@@ -1074,14 +1091,14 @@ class Volume:
             intermediate_baseshape = target.baseshape
 
         grid = volume_grid(intermediate_baseshape, transform=transform,
-                           device=self.device, localshape=self.baseshape)
+                           localshape=self.baseshape, device=self.device)
 
         resampled = torch.nn.functional.grid_sample(
                         input=self.tensor.float().unsqueeze(0),
                         grid=grid.unsqueeze(0),
                         mode=('bilinear' if mode == 'linear' else mode),
                         padding_mode=padding_mode,
-                        align_corners=True).squeeze(0)
+                        align_corners=False).squeeze(0)
 
         if antialias:
             resampled = vx.filters.gaussian_blur(resampled, sigma, stride=tuple(down_factor),
@@ -1176,7 +1193,8 @@ class Volume:
         transform: vx.AffineVolumeTransform | vx.AffineMatrix,
         resample: bool = False,
         negate: bool = False,
-        mode: str = 'linear') -> Volume:
+        mode: str = 'linear',
+        padding_mode: str = 'zeros') -> Volume:
         """
         Apply a spatial transform to the volume. By default, this method will not
         resample the image data and instead transform the world geometry.
@@ -1212,14 +1230,14 @@ class Volume:
 
         # construct the transformed resampling grid
         grid = volume_grid(target.baseshape, transform=inverted,
-                           device=self.device, localshape=self.baseshape)
+                           localshape=self.baseshape, device=self.device)
 
         interpolated = torch.nn.functional.grid_sample(
                         self.tensor.unsqueeze(0).float(),
                         grid.unsqueeze(0),
                         mode=('bilinear' if mode == 'linear' else mode),
-                        padding_mode='zeros',
-                        align_corners=True).squeeze(0)
+                        padding_mode=padding_mode,
+                        align_corners=False).squeeze(0)
 
         if negate:
             # apply inverse transform to the geometry to cancel out world space changes
@@ -1343,7 +1361,7 @@ def volume_grid(
 
     Args:
         baseshape (Size): Spatial (3D) shape of the volume grid.
-        transform (AffineMatrix, optional): Grid coordinate transform.
+        transform (AffineMatrix, optional): Grid voxel coordinate transform.
         localshape (Size, optional): If True, the grid is normalized
             between [1, -1] using the provided spatial shape and the
             coordinate order is swapped (for torch sampling methods).
@@ -1358,8 +1376,8 @@ def volume_grid(
     if transform:
         grid = transform.transform(grid)
     if localshape is not None:
-        div = torch.tensor(localshape).maximum(torch.tensor(2)).to(grid.device) - 1
-        grid = (grid / div * 2 - 1).flip(-1)
+        shape = torch.tensor(localshape).to(grid.device)
+        grid = ((2 * grid + 1) / shape - 1).flip(-1)
     return grid
 
 

@@ -4,7 +4,10 @@ import voxel as vx
 from . import utility
 
 
-def test_resample() -> None:
+# TODO: add a mult-frame case to all of these tests
+
+
+def test_resample():
     
     # resampling to the same resolution should not change the underlying data
     vol = utility.brain_t1w()
@@ -26,7 +29,7 @@ def test_resample() -> None:
     assert vx.volumes_equal(resampled, pooled, vol_tol=3e-3)
 
 
-def test_antialiasing() -> None:
+def test_antialiasing():
 
     # verify that antialiasing works as expected by assuming the result
     # is within a certain (manually computed) bound of the non-antialiased result.
@@ -45,3 +48,14 @@ def test_antialiasing() -> None:
     aa = vol.resample_like(target, antialias=True)
     noaa = vol.resample_like(target, antialias=False)
     assert vx.volumes_equal(aa, noaa)
+
+
+def test_point_sampling():
+
+    # make sure that sampling a volume at its own grid points and reshaping
+    # the result back to the original shape gives the original volume
+    vol = utility.brain_t1w()
+    points = vx.volume.volume_grid(vol.baseshape).view(-1, 3)
+    sampled = vol.sample(points, space='voxel', mode='nearest').swapaxes(0, 1)
+    reshaped = vol.new(sampled.view(vol.shape))
+    assert (reshaped == vol).all()
