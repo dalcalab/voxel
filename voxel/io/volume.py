@@ -123,7 +123,7 @@ class NiftiArrayIO(IOProtocol):
         volume = vx.Volume(features, affine)
 
         # 
-        volume.geometry.metadata['nii_reference'] = NiftiHeaderReference(nii)
+        volume.geometry.reference['reference'] = NiftiHeaderReference(nii)
 
         # 
         if not torch.isclose(volume.geometry.spacing, spacing, atol=0.01, rtol=0.2).all():
@@ -166,10 +166,9 @@ class NiftiArrayIO(IOProtocol):
         affine = volume.geometry.tensor.detach().cpu().numpy().astype(np.float64)
 
         # 
-        ref = volume.geometry.metadata.get('nii_reference')
+        ref = volume.geometry.reference.get('nii')
         matches_original = ref is not None and \
-            ref.baseshape == volume.baseshape and \
-            np.isclose(ref.affine, affine, rtol=0, atol=1e-4).all()
+            np.isclose(ref.affine, affine, rtol=0, atol=1e-3).all()
 
         # 
         if matches_original:
@@ -225,8 +224,8 @@ class PytorchVolumeIO(IOProtocol):
             volume (Volume): The volume to save.
             filename (PathLike): The path to the pytorch file to write.
         """
-        features = volume.tensor.detach().cpu()
-        matrix = volume.geometry.tensor.detach().cpu()
+        features = volume.tensor.detach().cpu().contiguous()
+        matrix = volume.geometry.tensor.detach().cpu().contiguous()
         torch.save({'v': features, 'm': matrix}, filename)
 
 

@@ -110,9 +110,14 @@ def gaussian_blur(
         slices[dim + 2] = slice(None)
         kernel_dim = kernel[slices]
 
+        # expand the kernel for multi-channel images
+        num_channels = image.shape[0]
+        if num_channels > 1:
+            kernel_dim = kernel_dim.expand((num_channels, *kernel_dim.shape[1:]))
+
         # apply the convolution
         conv = getattr(torch.nn.functional, f'conv{ndim}d')
-        blurred = conv(blurred, kernel_dim, groups=image.shape[0], stride=stride_dim, padding=padding)
+        blurred = conv(blurred, kernel_dim, groups=num_channels, stride=stride_dim, padding=padding)
 
     if not batched:
         blurred = blurred.squeeze(0)

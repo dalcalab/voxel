@@ -148,7 +148,7 @@ class Volume:
         Returns:
             Volume: A new volume instance with the detached tensor.
         """
-        return self.new(self.tensor.detach())
+        return self.new(self.tensor.detach(), self.geometry.detach())
 
     def to(self, device: torch.Device) -> Volume:
         """
@@ -162,7 +162,7 @@ class Volume:
         """
         if device is None:
             return self
-        return self.new(self.tensor.to(device))
+        return self.new(self.tensor.to(device), self.geometry.to(device))
 
     def cuda(self) -> Volume:
         """
@@ -171,7 +171,7 @@ class Volume:
         Returns:
             Volume: A new volume instance with the tensor on the GPU.
         """
-        return self.new(self.tensor.cuda())
+        return self.new(self.tensor.cuda(), self.geometry.cuda())
 
     def cpu(self) -> Volume:
         """
@@ -180,7 +180,7 @@ class Volume:
         Returns:
             Volume: A new volume instance with the tensor on the CPU.
         """
-        return self.new(self.tensor.cpu())
+        return self.new(self.tensor.cpu(), self.geometry.cpu())
 
     def type(self, dtype: torch.dtype) -> Volume:
         """
@@ -774,7 +774,7 @@ class Volume:
                               'pytorch3d package is installed') from exc
 
         # 
-        padded = self.detach().pad(self.geometry.spacing)
+        padded = self.detach().pad(1, 'voxel')
         vertices, faces = marching_cubes(padded.tensor.float(), threshold,
                                          return_local_coords=False)
         if len(vertices[0]) == 0:
@@ -810,16 +810,16 @@ class Volume:
             nonzero = tensor.view(self.baseshape).nonzero()
             if nonzero.shape[0] == 0:
                 raise ValueError('cannot compute nonzero bounds on an empty volume')
-            min_point = nonzero.amin(dim=0).float()
-            max_point = nonzero.amax(dim=0).float()
+            min_point = nonzero.amin(dim=0).float().cpu()
+            max_point = nonzero.amax(dim=0).float().cpu()
         else:
             # just use the bounds of the volume extent
-            min_point = torch.zeros(3, device=self.device)
-            max_point = torch.tensor(self.baseshape, device=self.device).float() - 1
-        
+            min_point = torch.zeros(3)
+            max_point = torch.tensor(self.baseshape).float() - 1
+
         # expand (or shrink) margin around border
         if margin is not None:
-            margin = self.geometry.conform_units(margin, space, 'world', 2)
+            margin = self.geometry.conform_units(margin, space, 'voxel', 2).cpu()
             min_point -= margin[:, 0]
             max_point += margin[:, 1]
 
@@ -853,7 +853,10 @@ class Volume:
             centroids = self.geometry.transform(centroids)
         return centroids
 
-    def crop(self, cropping: tuple | vx.Mesh, margin: float | torch.Tensor = None) -> Volume:
+    def crop(self,
+        cropping: tuple | vx.Mesh,
+        margin: float | torch.Tensor = None,
+        space: vx.Space = 'world') -> Volume:
         """
         Crop the volume to some bounding, either defined by a voxel slicing
         tuple or a bounding box mesh.
@@ -861,9 +864,11 @@ class Volume:
         Args:
             cropping (tuple or Mesh): Cropping defined by either a tuple of slices
                 or a bounding box mesh.
-            margin (float or Tensor, optional): Margin (in world units) to expand
-                the cropping boundary. Can be a positive or negative delta. The
-                boundary will be clipped if it extends beyond the shape of the volume.
+            margin (float or Tensor, optional): Margin to expand the cropping boundary.
+                Can be a positive or negative delta. The boundary will be clipped if it
+                extends beyond the shape of the volume.
+            space (Space): The coordinate space of the margin values, either
+                'voxel' or 'world'.
 
         Returns:
             Volume: The cropped volume instance.
@@ -871,7 +876,7 @@ class Volume:
 
         # transform to voxel units
         if margin is not None:
-            margin = (margin / self.geometry.spacing).round().int()
+            margin = self.geometry.conform_units(margin, space, 'voxel').cpu().round().int()
 
         if isinstance(cropping, vx.Mesh):
             # if we get a mesh as input, assume its a bounding box, but really

@@ -117,3 +117,27 @@ def slicing_to_coordinates(slicing: tuple, shape: tuple) -> tuple:
     stride = torch.tensor([x or 1 for x in stride]) if any(stride) else None
 
     return (minc, maxc, stride)
+
+
+def conform_coordinates(coords: torch.Tensor, num: int = None) -> torch.Tensor:
+    """
+    Conform coordinates to certain shape and dimensionality.
+
+    Args:
+        coords (Tensor): Coordinate tensor of size $(1,)$ or $(3,)$ or $(3, N)$.
+        num (int, optional): Number of coordinates $N$ represented in the second dimension
+            of the output tensor. If None, the output tensor will have shape $(3,)$.
+    
+    Returns:
+        Tensor: Coordinates of shape $(3, N)$ or $(3,)$.
+    """
+    coords = torch.as_tensor(coords)
+    if coords.ndim == 0:
+        coords = coords.repeat((3, num)) if num is not None else coords.repeat(3)
+    elif coords.shape == (3,) and num is not None:
+        coords = coords.unsqueeze(1).repeat(1, 2)
+    if num is not None and coords.shape != (3, num):
+        raise ValueError(f'tensor must be of size (3, {num}) or (3,) or (1,), got {coords.shape}')
+    if num is None and coords.shape != (3,):
+        raise ValueError(f'tensor must be of size (3,) or (1,), got {coords.shape}')
+    return coords

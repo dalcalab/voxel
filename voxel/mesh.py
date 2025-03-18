@@ -347,9 +347,9 @@ class Mesh:
 
         # expand (or shrink) margin around border
         if margin is not None:
-            threes = margin.shape == (3,)
-            min_point -= margin if threes else margin[0]
-            min_point += margin if threes else margin[1]
+            margin = vx.slicing.conform_coordinates(margin, 2)
+            min_point -= margin[:, 0]
+            max_point += margin[:, 1]
 
         return construct_box_mesh(min_point, max_point)
 

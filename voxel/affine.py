@@ -4,8 +4,13 @@ Affine transforms in three dimensions.
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 import torch
 import voxel as vx
+
+
+T = TypeVar('T', bound='AffineMatrix')
 
 
 class AffineMatrix:
@@ -69,6 +74,54 @@ class AffineMatrix:
             other = AffineMatrix(other).tensor
         result = self.tensor.to(other.device) @ other.type(self.tensor.dtype)
         return AffineMatrix(result) if isaffine else result
+
+    def _from_tensor_with_new_properties(self: T, tensor: torch.Tensor) -> T:
+        """
+        Base class utility function that creates a new object instance, with a
+        new matrix tensor, but the same metadata. This should be reimplemented
+        for subclasses. This function should be called in scenarios only when the
+        matrix has new properties (e.g. device or data type), not new values.
+        """
+        return self.__class__(tensor)
+
+    def detach(self: T) -> T:
+        """
+        Detach the matrix tensor from the current computational graph.
+
+        Returns:
+            A new affine with the detached matrix tensor.
+        """
+        return self._from_tensor_with_new_properties(self.tensor.detach())
+
+    def to(self: T, device: torch.Device) -> T:
+        """
+        Move the matrix tensor to a device.
+
+        Args:
+            device (Device): The target device.
+
+        Returns:
+            A new affine with the matrix tensor on the target device.
+        """
+        return self._from_tensor_with_new_properties(self.tensor.to(device))
+
+    def cuda(self: T) -> T:
+        """
+        Move the matrix tensor to the GPU.
+
+        Returns:
+            A new affine with the matrix tensor on the GPU.
+        """
+        return self._from_tensor_with_new_properties(self.tensor.cuda())
+
+    def cpu(self: T) -> T:
+        """
+        Move the matrix tensor to the CPU.
+
+        Returns:
+            A new affine with the matrix tensor on the CPU.
+        """
+        return self._from_tensor_with_new_properties(self.tensor.cpu())
 
     def inverse(self) -> AffineMatrix:
         """
