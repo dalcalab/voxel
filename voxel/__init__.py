@@ -11,6 +11,9 @@ from . import affine
 from .affine import AffineMatrix
 from .affine import AffineVolumeTransform
 
+from . import bounds
+from .bounds import BoundingBox
+
 from . import acquisition
 from .acquisition import AcquisitionGeometry
 from .acquisition import Orientation
