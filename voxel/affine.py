@@ -401,15 +401,26 @@ def random_affine(
     Returns:
         AffineMatrix: Random affine matrix.
     """
-    translation_range = sorted([-max_translation, max_translation])
-    translation = torch.distributions.uniform.Uniform(*translation_range).sample((3,))
+    translation = None
+    if max_translation < 0:
+        raise ValueError('max_translation must be a positive value')
+    if max_translation > 0:
+        translation_range = sorted([-max_translation, max_translation])
+        translation = torch.distributions.uniform.Uniform(*translation_range).sample((3,))
 
-    rotation_range = sorted([-max_rotation, max_rotation])
-    rotation = torch.distributions.uniform.Uniform(*rotation_range).sample((3,))
+    rotation = None
+    if max_rotation < 0:
+        raise ValueError('max_rotation must be a positive value')
+    if max_rotation > 0:
+        rotation_range = sorted([-max_rotation, max_rotation])
+        rotation = torch.distributions.uniform.Uniform(*rotation_range).sample((3,))
+        print(rotation)
 
+    scale = None
     if max_scaling < 0:
         raise ValueError('max_scaling must be a positive value')
-    scale = (1 + torch.rand(3) * max_scaling) ** torch.randn(3).sign()
+    if max_scaling > 0:
+        scale = (1 + torch.rand(3) * max_scaling) ** torch.randn(3).sign()
 
     aff = compose_affine(
         translation=translation,
