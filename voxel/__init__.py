@@ -13,6 +13,7 @@ from .affine import AffineVolumeTransform
 
 from . import bounds
 from .bounds import BoundingBox
+from .bounds import load_bounding_box
 
 from . import acquisition
 from .acquisition import AcquisitionGeometry

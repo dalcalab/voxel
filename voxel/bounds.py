@@ -4,6 +4,7 @@ Bounding box utilities.
 
 from __future__ import annotations
 
+import pathlib
 import torch
 import voxel as vx
 
@@ -23,7 +24,29 @@ class BoundingBox:
         self.center = torch.zeros(3) if center is None else center
         self.rotation = torch.eye(3) if rotation is None else rotation
         self.extent = torch.ones(3) if extent is None else extent
-    
+
+    def to(self, device: torch.Device) -> BoundingBox:
+        """
+        Move all bounding box parameters to a device.
+
+        Args:
+            device: A torch device.
+
+        Returns:
+            BoundingBox: A new bounding box instance.
+        """
+        return BoundingBox(self.center.to(device), self.rotation.to(device), self.extent.to(device))
+
+    def save(self, filename: pathlib.Path) -> None:
+        """
+        Save the bounding box to file.
+
+        Args:
+            filename (Path): File destination.
+        """
+        params = dict(center=self.center, rotation=self.rotation, extent=self.extent)
+        torch.save(params, filename)
+
     def mesh(self) -> vx.Mesh:
         """
         Construct a rectangular box mesh from the bounding box.
@@ -178,6 +201,19 @@ class BoundingBox:
             BoundingBox: Fine-tuned bounding box.
         """
         return obbox_fine_tune(points, self.rotation)
+
+
+def load_bounding_box(filename: pathlib.Path) -> BoundingBox:
+    """
+    Load a bounding box from file.
+
+    Args:
+        filename (Path): Target file to load.
+    
+    returns:
+        BoundingBox: Loaded bounding box.
+    """
+    return BoundingBox(**torch.load(filename))
 
 
 def obbox(points: torch.Tensor, initialize: bool = True, fine_tune: bool = True) -> BoundingBox:
