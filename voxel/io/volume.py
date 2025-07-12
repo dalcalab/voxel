@@ -151,9 +151,7 @@ class NiftiArrayIO(IOProtocol):
             volume_array = np.squeeze(volume_array, -1)
 
         # convert to a valid output type (for now this is only bool but there are probably more)
-        type_map = {
-            np.bool8: np.uint8,
-        }
+        type_map = {np.dtype('bool'): np.uint8}
         dtype_id = next((i for dt, i in type_map.items() if np.issubdtype(volume_array.dtype, dt)), None)
         if dtype_id is not None:
             volume_array = volume_array.astype(dtype_id)
