@@ -232,7 +232,7 @@ def load_bounding_box(filename: pathlib.Path) -> BoundingBox:
     returns:
         BoundingBox: Loaded bounding box.
     """
-    return BoundingBox(**torch.load(filename))
+    return BoundingBox(**torch.load(filename, weights_only=False))
 
 
 def obbox(points: torch.Tensor, initialize: bool = True, fine_tune: bool = True) -> BoundingBox:

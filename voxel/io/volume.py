@@ -209,7 +209,7 @@ class PytorchVolumeIO(IOProtocol):
         Returns:
             Volume: The loaded volume.
         """
-        items = torch.load(filename)
+        items = torch.load(filename, weights_only=False)
         if 'v' not in items or 'm' not in items:
             raise RuntimeError(f'could not find `v` or `m` data keys in {filename}')
         return vx.Volume(items['v'], items['m'])
