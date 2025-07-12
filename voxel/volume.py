@@ -870,6 +870,44 @@ class Volume:
             centroids = self.geometry.transform(centroids)
         return centroids
 
+    def slice(self,
+        point: int | torch.Tensor,
+        direction: int | torch.Tensor,
+        space: vx.Space) -> Volume:
+        """
+        Extract a slice from the volume. Note this will still return a volume,
+        but with a slice dimension reduced to 1.
+
+        Args:
+            point (int or Tensor): A point of the slice plane. If a tensor,
+                it should represent a 3D point coordinate. If an int, it should be
+                the index of the slice in the specified direction. Note that this requires
+                the slice direction axis to be specified as an int as well.
+            direction (int or Tensor): The direction of the slice plane. If a tensor,
+                it should represent a 3D vector direction. If an int, it should be
+                the index of the slice in the specified direction.
+            space (Space): The coordinate space of the slice point and direction.
+
+        Returns:
+            Volume: The sliced volume instance.
+        """
+        if vx.Space(space) == 'world':
+            raise NotImplementedError('slicing in world space is not yet supported')
+        if isinstance(point, torch.Tensor):
+            raise NotImplementedError('slicing with a 3d plane point is not yet supported')
+        if isinstance(direction, torch.Tensor):
+            raise NotImplementedError('slicing with a direction vector is not yet supported')
+
+        if direction < 0 or direction > 2:
+            raise ValueError(f'slice direction must be between 0 and 2, got {direction}')
+        if point < 0 or point >= self.baseshape[direction]:
+            raise ValueError(f'slice index {point} out of bounds for shape {self.baseshape}')
+
+        # create a cropping tuple to extract the slice
+        cropping = [slice(None) for _ in range(4)]
+        cropping[direction + 1] = slice(point, point + 1)
+        return self[tuple(cropping)]
+
     def crop(self,
         cropping: tuple | vx.Mesh,
         margin: float | torch.Tensor = None,
