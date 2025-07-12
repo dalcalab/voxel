@@ -20,7 +20,7 @@ class Volume:
 
     def __init__(self,
         tensor: torch.Tensor,
-        geometry: vx.AcquisitionGeometry | vx.AffineMatrix | None = None) -> None:
+        geometry: vx.AcquisitionGeometry | vx.AffineMatrix = None) -> None:
         """
         Args:
             tensor (Tensor): Image data tensor of shape $(C, W, H, D)$ or $(W, H, D)$. 
@@ -58,7 +58,7 @@ class Volume:
     @geometry.setter
     def geometry(self, geometry: vx.AcquisitionGeometry):
         if not isinstance(geometry, vx.AcquisitionGeometry):
-            geometry = vx.AcquisitionGeometry(self.baseshape, geometry)
+            geometry = vx.AcquisitionGeometry(self.baseshape, matrix=geometry, device=self.device)
         elif geometry.baseshape != self.baseshape:
             raise ValueError(f'acquisition geometry shape {tuple(geometry.baseshape)} must '
                              f'match the image base shape {tuple(self.baseshape)}')
