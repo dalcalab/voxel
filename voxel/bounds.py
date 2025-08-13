@@ -47,12 +47,12 @@ class BoundingBox:
         params = dict(center=self.center, rotation=self.rotation, extent=self.extent)
         torch.save(params, filename)
 
-    def mesh(self) -> vx.Mesh:
+    def corner_points(self) -> torch.Tensor:
         """
-        Construct a rectangular box mesh from the bounding box.
-        
+        Compute the corner points of the bounding box.
+
         Returns:
-            Mesh: Rectangular box mesh.
+            Tensor: Corner point tensor of shape (8, 3).
         """
         signs = torch.tensor([
             [0, 0, 0],
@@ -66,14 +66,33 @@ class BoundingBox:
             dtype=torch.float32,
             device=self.center.device) * 2 - 1
 
-        # compose into an affine matrix
         T = torch.eye(4, device=self.center.device, dtype=self.center.dtype)
         T[:3, :3] = self.rotation @ torch.diag(self.extent)
         T[:3, 3] = self.center
         affine = vx.AffineMatrix(T)
 
-        # transform vertices
-        vertices = affine.transform(signs)
+        return affine.transform(signs)
+
+    def min_max_coords(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the minimum and maximum coordinates of the bounding box.
+
+        Returns:
+            tuple: Minimum and maximum coordinates.
+        """
+        points = self.corner_points()
+        min_coord = points.amin(dim=0)
+        max_coord = points.amax(dim=0)
+        return min_coord, max_coord
+
+    def mesh(self) -> vx.Mesh:
+        """
+        Construct a rectangular box mesh from the bounding box.
+        
+        Returns:
+            Mesh: Rectangular box mesh.
+        """
+        vertices = self.corner_points()
 
         # triangular faces
         faces = torch.tensor([
@@ -213,7 +232,7 @@ def load_bounding_box(filename: pathlib.Path) -> BoundingBox:
     returns:
         BoundingBox: Loaded bounding box.
     """
-    return BoundingBox(**torch.load(filename))
+    return BoundingBox(**torch.load(filename, weights_only=False))
 
 
 def obbox(points: torch.Tensor, initialize: bool = True, fine_tune: bool = True) -> BoundingBox:

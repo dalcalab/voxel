@@ -189,7 +189,7 @@ class TorchMeshIO(IOProtocol):
         Returns:
             Mesh: The loaded mesh.
         """
-        items = torch.load(filename)
+        items = torch.load(filename, weights_only=False)
         if 'v' not in items or 'f' not in items:
             raise RuntimeError(f'could not find `v` or `f` data keys in {filename}')
         return vx.Mesh(items['v'], items['f'])

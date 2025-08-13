@@ -1231,11 +1231,11 @@ class Volume:
         center image to fit a given **baseshape**.
 
         This method is symmetric in that performing a reverse reshape operation
-        will always yeild the original geometry.
+        will always yield the original geometry.
 
         args:
             baseshape (torch.Size): Target spatial (3D) shape.
-        
+
         returns:
             Volume: Reshaped volume instance.
         """
