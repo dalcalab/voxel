@@ -101,7 +101,7 @@ class Volume:
 
     def new(self,
         tensor: torch.Tensor,
-        geometry: vx.AcquisitionGeometry | None = None) -> Volume:
+        geometry: vx.AcquisitionGeometry = None) -> Volume:
         """
         Construct a new volume instance with the provided features tensor, while
         preserving any unchanged properties of the original volume.
@@ -232,11 +232,11 @@ class Volume:
         """
         return self.new(self.tensor.bool())
 
-    def max(self, dim: int | None = None) -> Volume | torch.Tensor:
+    def max(self, dim: int = None) -> Volume | torch.Tensor:
         """
         Get the maximum value in the volume tensor.
 
-                Args:
+        Args:
             dim (int, optional): The dimension or dimensions to
                 reduce. If None, all dimensions are reduced. If
                 the dimension is 0 (channel axis), a single-channel
@@ -248,7 +248,7 @@ class Volume:
         reduced = self.tensor.amax(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def min(self, dim: int | None = None) -> Volume | torch.Tensor:
+    def min(self, dim: int = None) -> Volume | torch.Tensor:
         """
         Get the minimum value in the volume features.
 
@@ -264,7 +264,7 @@ class Volume:
         reduced = self.tensor.amin(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def sum(self, dim: int | None = None) -> Volume | torch.Tensor:
+    def sum(self, dim: int = None) -> Volume | torch.Tensor:
         """
         Compute the sum of all voxels.
 
@@ -280,7 +280,7 @@ class Volume:
         reduced = self.tensor.sum(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def mean(self, dim: int | None = None) -> Volume | torch.Tensor:
+    def mean(self, dim: int = None) -> Volume | torch.Tensor:
         """
         Compute the mean of all voxels.
 
@@ -424,7 +424,7 @@ class Volume:
         """
         return self.new(self.tensor.minimum(other.tensor))
 
-    def all(self, dim: int | None = None) -> Volume | torch.Tensor:
+    def all(self, dim: int = None) -> Volume | torch.Tensor:
         """
         Check if all elements in the volume are True.
 
@@ -441,7 +441,7 @@ class Volume:
         reduced = self.tensor.all(**kwargs)
         return self.new(reduced) if dim == 0 else reduced
 
-    def any(self, dim: int | None = None) -> Volume | torch.Tensor:
+    def any(self, dim: int = None) -> Volume | torch.Tensor:
         """
         Check if any elements in the volume are True.
 
@@ -459,8 +459,8 @@ class Volume:
         return self.new(reduced) if dim == 0 else reduced
 
     def zeros_like(self,
-        channels: int | None = None,
-        dtype: torch.dtype | None = None) -> Volume:
+        channels: int = None,
+        dtype: torch.dtype = None) -> Volume:
         """
         Create a volume of zeros with the same geometry and
         device as the current instance.
@@ -478,8 +478,8 @@ class Volume:
         return self.geometry.zeros_like(channels, dtype=dtype)
 
     def ones_like(self,
-        channels: int | None = None,
-        dtype: torch.dtype | None = None) -> Volume:
+        channels: int = None,
+        dtype: torch.dtype = None) -> Volume:
         """
         Create a volume of ones with the same geometry and
         device as the current instance.
@@ -498,8 +498,8 @@ class Volume:
 
     def full_like(self,
         fill: float,
-        channels: int | None = None,
-        dtype: torch.dtype | None = None) -> Volume:
+        channels: int = None,
+        dtype: torch.dtype = None) -> Volume:
         """
         Create a volume filled with a specific value and with the same
         geometry and device as the current instance.
@@ -518,8 +518,8 @@ class Volume:
         return self.geometry.full_like(fill, channels, dtype=dtype)
 
     def rand_like(self,
-        channels: int | None = None,
-        dtype: torch.dtype | None = None) -> Volume:
+        channels: int = None,
+        dtype: torch.dtype = None) -> Volume:
         """
         Create a volume of random values with the same geometry and
         device as the current instance. Values are sampled from a uniform
@@ -538,8 +538,8 @@ class Volume:
         return self.geometry.rand_like(channels, dtype=dtype)
 
     def randn_like(self,
-        channels: int | None = None,
-        dtype: torch.dtype | None = None) -> Volume:
+        channels: int = None,
+        dtype: torch.dtype = None) -> Volume:
         """
         Create a volume of random values with the same geometry and
         device as the current instance. Values are sampled from a normal
@@ -608,6 +608,54 @@ class Volume:
         else:
             k = int(flattened.numel() * q) + 1
             return flattened.topk(k, largest=False, sorted=False).values.max()
+
+    def softmax(self, dim: int = 0) -> Volume | torch.Tensor:
+        """
+        Get the maximum index in the volume tensor.
+
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If the dimension is 0 (channel axis), a
+                single-channel volume is returned.
+
+        Returns:
+            Tensor or Volume: Softmaxed probabilities.
+        """
+        reduced = self.tensor.softmax(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
+
+    def argmax(self, dim: int = None) -> Volume | torch.Tensor:
+        """
+        Get the maximum index in the volume tensor.
+
+        Args:
+            dim (int, optional): The dimension or dimensions to
+                reduce. If None, all dimensions are reduced. If
+                the dimension is 0 (channel axis), a single-channel
+                volume is returned.
+
+        Returns:
+            Tensor or Volume: The maximum indices or volume.
+        """
+        reduced = self.tensor.argmax(dim=dim)
+        return self.new(reduced) if dim == 0 else reduced
+
+    def onehot(self, num_classes: int = -1) -> vx.Volume:
+        """
+        One hot encode a label volume.
+
+        Args:
+            num_classes (int, optional): Total number of classes. If set to -1, the
+                number of classes will be inferred as one greater than the largest
+                class value in the input volume. 
+
+        Returns:
+            Tensor or Volume: The maximum indices or volume.
+        """
+        assert self.num_channels == 1, f'cannot one hot volume with {self.num_channels} channels'
+        assert not torch.is_floating_point(self.tensor), f'one hot requires volume of type int, got {self.dtype}'
+        tensor = torch.nn.functional.one_hot(self.tensor.squeeze(0).long(), num_classes=num_classes)
+        return self.new(tensor.movedim(-1, 0))
 
     # -------------------------------------------------------------------------
     # indexing / operator overloads for tensor-style voxel data manipulation
@@ -1391,9 +1439,9 @@ def _cast_volume_as_tensor(other: object) -> object:
 
 def volume_grid(
     baseshape: torch.Size,
-    transform: vx.AffineMatrix | None = None,
-    localshape: torch.Size | None = None,
-    device: torch.device | None = None) -> torch.Tensor:
+    transform: vx.AffineMatrix = None,
+    localshape: torch.Size = None,
+    device: torch.device = None) -> torch.Tensor:
     """
     Construct a grid of 3D voxel coordinates of the shape (W, H, D, 3).
 
@@ -1403,7 +1451,7 @@ def volume_grid(
         localshape (Size, optional): If True, the grid is normalized
             between [1, -1] using the provided spatial shape and the
             coordinate order is swapped (for torch sampling methods).
-        device (torch.device | None, optional): Device on which to
+        device (torch.device, optional): Device on which to
             allocate the grid data.
 
     Returns:
