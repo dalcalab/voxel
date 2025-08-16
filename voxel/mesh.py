@@ -153,7 +153,7 @@ class Mesh:
         Vertex cross-product with shape (F, 3).
         """
         vecs = torch.diff(self.triangles, dim=1)
-        return torch.cross(vecs[:, 0], vecs[:, 1])
+        return torch.cross(vecs[:, 0], vecs[:, 1], dim=1)
 
     @vx.caching.cached_transferable
     def edges(self) -> torch.Tensor:
@@ -200,7 +200,6 @@ class Mesh:
         """
         Indices that extract all unique edges from the directional edge list.
         """
-        device = self.faces.device
         aligned = self.edges.sort(dim=1)[0]
 
         # this is a way to do lexsort in pytorch, which is faster
@@ -209,6 +208,7 @@ class Mesh:
         order = idx.gather(-1, aligned[:, 0].gather(-1, idx).argsort(dim=-1, stable=True))
 
         pef = aligned[order]
+        device = self.faces.device
         shift = torch.cat([torch.tensor([True], device=device),
                            torch.any(pef[1:] != pef[:-1], dim=-1),
                            torch.tensor([True], device=device)])
@@ -217,7 +217,12 @@ class Mesh:
                                            (matched[1:] - matched[:-1]))
         reverse = repeated[order.argsort()]
         indices = order[matched[:-1]]
-        return indices, reverse
+
+        repeats = torch.all(pef[:-1] == pef[1:], dim=-1)
+        matched = repeats.nonzero(as_tuple=False).squeeze(-1)
+        bidir_indices = order[torch.stack([matched, matched + 1], dim=1)]
+
+        return indices, reverse, bidir_indices
 
     @vx.caching.cached_transferable
     def unique_edges(self):
@@ -231,9 +236,7 @@ class Mesh:
         """
         Adjacent faces indices corresponding to each edge in `unique_edges`.
         """
-        indices = self.unique_edge_indices[0].tile((1, 2))
-        indices[:, 1] += 1
-        return self.edge_face[indices]
+        return self.edge_face[self.unique_edge_indices[2]]
 
     @vx.caching.cached
     def face_normals(self) -> torch.Tensor:
