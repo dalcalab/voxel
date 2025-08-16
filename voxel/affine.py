@@ -414,7 +414,6 @@ def random_affine(
     if max_rotation > 0:
         rotation_range = sorted([-max_rotation, max_rotation])
         rotation = torch.distributions.uniform.Uniform(*rotation_range).sample((3,))
-        print(rotation)
 
     scale = None
     if max_scaling < 0:
