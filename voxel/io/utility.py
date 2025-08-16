@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import os
 import pathlib
+import numpy as np
+import torch
 
 
 def check_file_readability(filename: os.PathLike) -> None:
@@ -140,3 +142,42 @@ def get_all_extensions(protocols: list) -> list:
         else:
             extensions.extend(protocol.extensions)
     return extensions
+
+
+def numpy_to_tensor(x, dtype: torch.dtype = None, copy: bool = False) -> torch.Tensor:
+    """
+    Safely convert a numpy array to a tensor.
+
+    Args:
+        x: Numpy ndarray or array-like to convert
+        dtype (dtype, optional): Optional torch dtype
+        copy (bool, optional): Force a copy even if sharing is possible
+
+    Returns:
+        Tensor: Converted tensor
+    """
+    if isinstance(x, torch.Tensor):
+        return x
+
+    if not isinstance(x, np.ndarray):
+        x = np.asarray(x)
+
+    # only numeric/boolean dtypes are meaningful for tensors
+    if x.dtype.kind not in "biufc?":  # bool/int/uint/float/complex/bool
+        raise TypeError(f"unsupported dtype kind '{x.dtype.kind}' for tensor conversion")
+
+    # normalize endianness: make sure dtype is native (or non-endian, e.g. '|u1')
+    # np.dtype.byteorder: '=' native, '<' little, '>' big, '|' not applicable
+    bo = x.dtype.byteorder
+    if bo not in ('=', '|'):
+        # if platform is little-endian and x is big-endian (or vice versa), swap
+        if (bo == '>' and np.little_endian) or (bo == '<' and not np.little_endian):
+            # byteswap returns a view by default - newbyteorder('=') sets native
+            x = x.byteswap().newbyteorder('=')
+
+    # if requested, or if array is read-only, make a copy so torch can safely own/write
+    if copy or (hasattr(x, "flags") and not x.flags.writeable):
+        x = x.copy()
+
+    # use as_tensor to share memory when possible but copy when required
+    return torch.as_tensor(x, dtype=dtype)

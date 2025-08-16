@@ -123,7 +123,7 @@ class NiftiArrayIO(IOProtocol):
         volume = vx.Volume(features, affine)
 
         # 
-        volume.geometry.reference['reference'] = NiftiHeaderReference(nii)
+        volume.geometry.reference['nii'] = NiftiHeaderReference(nii)
 
         # 
         if not torch.isclose(volume.geometry.spacing, spacing, atol=0.01, rtol=0.2).all():
@@ -166,6 +166,7 @@ class NiftiArrayIO(IOProtocol):
         # 
         ref = volume.geometry.reference.get('nii')
         matches_original = ref is not None and \
+            ref.baseshape == tuple(volume.baseshape) and \
             np.isclose(ref.affine, affine, rtol=0, atol=1e-3).all()
 
         # 
@@ -188,6 +189,61 @@ class NiftiArrayIO(IOProtocol):
 
         # write
         self.nib.save(nii, filename)
+
+
+class MghArrayIO(IOProtocol):
+    """
+    Array IO protocol for mgh files.
+    """
+    name = 'mgh'
+    extensions = ('.mgz', '.mgh')
+
+    def __init__(self) -> None:
+        try:
+            import surfa as sf
+        except ImportError:
+            raise ImportError('the `surfa` python package must be installed for mgh volume IO')
+        self.sf = sf
+
+    def load(self, filename: os.PathLike) -> vx.Volume:
+        """
+        Read array from a MGH file.
+
+        Args:
+            filename (PathLike): The path to the MGH file to read.
+
+        Returns:
+            Volume: The loaded volume.
+        """
+        sv = self.sf.load_volume(filename)
+
+        data = vx.io.numpy_to_tensor(sv.framed_data).movedim(-1, 0)
+        matrix = vx.io.numpy_to_tensor(sv.geom.vox2world.matrix, copy=True)
+        volume = vx.Volume(data, matrix)
+
+        volume.geometry.reference['mgh'] = sv.geom
+
+        return volume
+
+    def save(self, volume: vx.Volume, filename: os.PathLike) -> None:
+        """
+        Write volume to a MGH file.
+
+        Args:
+            volume (Volume): The volume to save.
+            filename (PathLike): The path to the MGH file to write.
+        """
+        volume_array = volume.tensor.movedim(0, -1).detach().cpu().numpy()
+        affine = volume.geometry.tensor.detach().cpu().numpy()
+
+        ref = volume.geometry.reference.get('mgh')
+        matches_original = ref is not None and \
+            tuple(ref.shape) == tuple(volume.baseshape) and \
+            np.isclose(ref.vox2world.matrix, affine, rtol=0, atol=1e-3).all()
+
+        geometry = ref if matches_original else self.sf.ImageGeometry(volume.baseshape, vox2world=affine)
+
+        self.sf.Volume(volume_array, geometry=geometry).save(filename)
 
 
 class PytorchVolumeIO(IOProtocol):
@@ -230,5 +286,6 @@ class PytorchVolumeIO(IOProtocol):
 # enabled volume IO protocol classes
 volume_io_protocols = [
     NiftiArrayIO,
+    MghArrayIO,
     PytorchVolumeIO,
 ]
