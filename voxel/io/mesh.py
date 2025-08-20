@@ -45,9 +45,6 @@ def save_mesh(mesh: vx.Mesh, filename: os.PathLike, fmt: str = None, **kwargs) -
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
         kwargs: Additional arguments to pass to the file writing method.
-    
-    Notes:
-        By default the mesh will write to 
     """
     if fmt is None:
         proto = vx.io.utility.find_protocol_by_extension(mesh_io_protocols, filename)

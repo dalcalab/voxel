@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
+import os
 import torch
 import voxel as vx
 
@@ -83,6 +84,17 @@ class AffineMatrix:
         matrix has new properties (e.g. device or data type), not new values.
         """
         return self.__class__(tensor)
+
+    def save(self, filename: os.PathLike, fmt: str = None) -> None:
+        """
+        Save the affine matrix to a file.
+
+        Args:
+            filename (PathLike): The path to the file to save.
+            fmt (str, optional): The format of the file. If None, the format is
+                determined by the file extension.
+        """
+        vx.save_affine(self, filename, fmt=fmt)
 
     def detach(self: T) -> T:
         """
