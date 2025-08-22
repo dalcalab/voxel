@@ -9,7 +9,7 @@ import voxel as vx
 from .utility import IOProtocol
 
 
-def load_mesh(filename: os.PathLike, fmt: str = None) -> vx.Mesh:
+def load_mesh(filename: os.PathLike, fmt: str = None, **kwargs) -> vx.Mesh:
     """
     Load a mesh from a file.
 
@@ -17,6 +17,7 @@ def load_mesh(filename: os.PathLike, fmt: str = None) -> vx.Mesh:
         filename (PathLike): The path to the file to load.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
+        **kwargs: Additional arguments to pass to the file reading method.
 
     Returns:
         Mesh: The loaded mesh.
@@ -32,7 +33,7 @@ def load_mesh(filename: os.PathLike, fmt: str = None) -> vx.Mesh:
         if proto is None:
             raise ValueError(f'unknown file format {fmt}')
 
-    return proto().load(filename)
+    return proto().load(filename, **kwargs)
 
 
 def save_mesh(mesh: vx.Mesh, filename: os.PathLike, fmt: str = None, **kwargs) -> None:
@@ -289,7 +290,7 @@ class FreesurferIO(IOProtocol):
                               'freesurfer surface IO')
         self.surfa = surfa
 
-    def load(self, filename: os.PathLike) -> vx.Mesh:
+    def load(self, filename: os.PathLike, space: vx.Space = 'world') -> vx.Mesh:
         """
         Read mesh from a freesurfer surface file.
 
@@ -299,7 +300,7 @@ class FreesurferIO(IOProtocol):
         Returns:
             Mesh: The loaded mesh.
         """
-        smesh = self.surfa.load_mesh(filename).convert(space='world')
+        smesh = self.surfa.load_mesh(filename).convert(space=space)
         return vx.Mesh(torch.as_tensor(smesh.vertices), torch.as_tensor(smesh.faces))
 
     def save(self, mesh: vx.Mesh, filename: os.PathLike) -> None:
