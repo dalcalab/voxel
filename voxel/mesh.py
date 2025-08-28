@@ -277,6 +277,12 @@ class Mesh:
         normals = torch.zeros_like(self.vertices).scatter_add(-2, indices, scalars)
         return torch.nn.functional.normalize(normals)
 
+    def flip_faces(self) -> vx.Mesh:
+        """
+        Flip triangular face directions.
+        """
+        return vx.Mesh(self.vertices, self.faces.flip(-1))
+
     def gather(self, features: torch.Tensor, reduce: str = 'mean') -> torch.Tensor:
         """
         """
