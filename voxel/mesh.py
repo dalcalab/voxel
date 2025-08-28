@@ -277,6 +277,17 @@ class Mesh:
         normals = torch.zeros_like(self.vertices).scatter_add(-2, indices, scalars)
         return torch.nn.functional.normalize(normals)
 
+    @vx.caching.cached
+    def vertex_areas(self) -> torch.Tensor:
+        """
+        The total face surface area contributed to each vertex.
+        """
+        area_contributions = self.face_areas.unsqueeze(-1) * self.face_angles / torch.pi
+        source = area_contributions.view(-1)
+        indices = self.faces.view(-1).long()
+        zeros = torch.zeros(self.num_vertices, dtype=self.vertices.dtype, device=self.device)
+        return zeros.scatter_reduce(0, indices, source, reduce='sum', include_self=False)
+
     def flip_faces(self) -> vx.Mesh:
         """
         Flip triangular face directions.
