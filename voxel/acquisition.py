@@ -4,6 +4,7 @@ Mapping of image voxel coordinates to world space.
 
 from __future__ import annotations
 
+import math
 import torch
 import voxel as vx
 
@@ -396,6 +397,65 @@ class AcquisitionGeometry(vx.AffineMatrix):
             slice_direction = self.slice_direction
 
         return vx.AcquisitionGeometry(newshape, matrix, slice_direction=slice_direction)
+
+    def pool(self,
+        scale: int = 2,
+        spacing_ratio_thresh: float = None) -> AcquisitionGeometry:
+        """
+        Pool the geometry with a sliding window.
+
+        By default, this will pool over all dimensions, but it can be conditionally
+        disabled for the slice dimension based on the ratio of slice vs in-plane spacing, 
+        i.e. the value of `geometry.spacing_ratio`. For example, if the slice spacing is
+        `spacing_ratio_thresh` times greater than the in-plane spacing, the slice dimension
+        will not be pooled. Mind that if the resulting pooled volume has a slice spacing
+        less than the in-plane spacing, it will be resampled to an isotropic resolution.
+
+        There is no analogous `unpool` method because there is complexity in determining
+        the desired unpooling strategy. To return to the original geometry, instead use
+        the `resample_like` method. If no reference geometry is available, just use
+        the `reshape` method to upsample.
+
+        Note that this implementation must mirror the pooling operation used by the volume
+        class. Any changes to the pooling operation in one class must be reflected in the other.
+
+        Args:
+            scale (int, optional): The size of the pooling window. Defaults to 2.
+            spacing_ratio_thresh (float, optional): Slice spacing ration that determines
+                whether the slice dimension is pooled. This is disabled by default.
+
+        Returns:
+            AcquisitionGeometry: Pooled geometry.
+        """
+
+        # dowsample factors for each dimension
+        factors = [1 if d == 1 else scale for d in self.baseshape]
+
+        # check if we should pool the slice dimension based on the spacing ratio threshold
+        slice_dim_pooling = spacing_ratio_thresh is None or self.spacing_ratio < spacing_ratio_thresh
+
+        if not slice_dim_pooling:
+            factors[self.geometry.slice_direction] = 1
+
+        pooled_shape = [math.ceil(s / f) for s, f in zip(self.baseshape, factors)]
+
+        # adjust the geometry based on the pooling factors
+        shift = [0.5 * (f - 1) for f in factors]
+        adjusted = self.shift(shift, space='voxel').scale(factors, space='voxel')
+        pooled = vx.AcquisitionGeometry(pooled_shape, adjusted)
+
+        # if the slice dimension was not pooled and the resulting slice spacing
+        # is less than the in-plane spacing, we need to resample the slice dimension
+        if not slice_dim_pooling and self.spacing_ratio < scale:
+            spacing = pooled.geometry.spacing.clone()
+            spacing[self.geometry.slice_direction] = spacing[self.geometry.in_plane_directions].mean()
+            pooled = pooled.resample(spacing)
+
+        # sanity check
+        if pooled.spacing_ratio < 0.99:
+            raise ValueError('unexpected spacing ratio after pooling operation')
+
+        return pooled
 
     def reshape(self, baseshape: torch.Size, from_origin: bool = False) -> AcquisitionGeometry:
         """

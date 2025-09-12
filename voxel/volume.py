@@ -1350,6 +1350,9 @@ class Volume:
         the `resample_like` method. If no reference geometry is available, just use
         the `reshape` method to upsample.
 
+        Note that this implementation must mirror the pooling operation used by the geometry
+        class. Any changes to the pooling operation in one class must be reflected in the other.
+
         Args:
             scale (int, optional): The size of the pooling window. Defaults to 2.
             mode (str, optional): Pooling mode - can be 'mean' or 'max'. Defaults to 'mean'.
