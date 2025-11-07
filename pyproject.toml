@@ -2,7 +2,7 @@
 name = 'voxel'
 description = 'Torch framework for volumetric medical imaging structures'
 readme = 'readme.md'
-keywords = ['medical imaging', 'deep-learning', 'AI', 'MRI]
+keywords = ['medical imaging', 'deep-learning', 'AI', 'MRI']
 classifiers = [
     'Topic :: Scientific/Engineering',
     'Intended Audience :: Science/Research',
