@@ -1,8 +1,8 @@
 [project]
 name = 'voxel'
-description = 'Learning-Based Utilities for Medical Image Analysis'
+description = 'Torch framework for volumetric medical imaging structures'
 readme = 'readme.md'
-keywords = ['medical imaging', 'deep-learning', 'MRI', 'AI']
+keywords = ['medical imaging', 'deep-learning', 'AI', 'MRI]
 classifiers = [
     'Topic :: Scientific/Engineering',
     'Intended Audience :: Science/Research',
@@ -13,7 +13,7 @@ classifiers = [
 authors = [
     {name = 'Andrew Hoopes'}
 ]
-requires-python = '>=3.7'
+requires-python = '>=3.8'
 dynamic = ['version']
 dependencies = [
     'numpy',
