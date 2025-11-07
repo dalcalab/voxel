@@ -158,7 +158,7 @@ class AffineMatrix:
             raise ValueError('Coordinates must have a last dimension of size 3.')
 
         # reshape to a 2D tensor for the transformation
-        coords_reshaped = coords.view(-1, 3)
+        coords_reshaped = coords.reshape(-1, 3)
 
         # convert to homogeneous coordinates
         ones = torch.ones((coords_reshaped.shape[0], 1), dtype=coords.dtype, device=coords.device)
@@ -166,7 +166,7 @@ class AffineMatrix:
 
         # apply the transformation, convert back to cartesian, and reshape
         transformed_coords = coords_homogeneous @ self.tensor.T.to(coords.device)
-        return transformed_coords[:, :3].view(coords.shape)
+        return transformed_coords[:, :3].reshape(coords.shape)
 
 
 class AffineVolumeTransform(AffineMatrix):

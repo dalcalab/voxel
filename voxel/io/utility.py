@@ -173,7 +173,7 @@ def numpy_to_tensor(x, dtype: torch.dtype = None, copy: bool = False) -> torch.T
         # if platform is little-endian and x is big-endian (or vice versa), swap
         if (bo == '>' and np.little_endian) or (bo == '<' and not np.little_endian):
             # byteswap returns a view by default - newbyteorder('=') sets native
-            x = x.byteswap().newbyteorder('=')
+            x = x.byteswap().view(x.dtype.newbyteorder('='))
 
     # if requested, or if array is read-only, make a copy so torch can safely own/write
     if copy or (hasattr(x, "flags") and not x.flags.writeable):
