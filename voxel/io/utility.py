@@ -23,7 +23,7 @@ def check_file_readability(filename: os.PathLike) -> None:
     if filename.is_dir():
         raise ValueError(f'{filename} is a directory, not a file')
 
-    if not filename.is_file():
+    if not (filename.is_file() or filename.resolve().is_file()):
         raise FileNotFoundError(f'{filename} is not a file')
 
     if not os.access(filename, os.R_OK):
