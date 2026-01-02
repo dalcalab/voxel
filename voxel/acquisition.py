@@ -183,6 +183,20 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self.voxel_to_world_units(torch.tensor(self.baseshape, device=self.device))
 
+    @vx.caching.cached
+    def origin(self) -> torch.Tensor:
+        """
+        Origin coordinate of the acquisition grid in world space.
+        """
+        return self.transform(torch.zeros(3, device=self.device))
+
+    @vx.caching.cached
+    def center(self) -> torch.Tensor:
+        """
+        Center coordinate of the acquisition grid in world space.
+        """
+        return self.transform((torch.tensor(self.baseshape, device=self.device) - 1) / 2)
+
     def voxel_to_local_coordinates(self, coords: torch.Tensor) -> torch.Tensor:
         """
         Transform voxel coordiates to flipped local grid coordinates in
@@ -264,6 +278,22 @@ class AcquisitionGeometry(vx.AffineMatrix):
         trf = vx.affine.translation_matrix(torch.as_tensor(delta, device=self.device))
         matrix = trf @ self if vx.Space(space) =='world' else self @ trf
         return self._from_new_properties(matrix=matrix)
+    
+    def shift_to_point(self, target: torch.Tensor, center: bool = True) -> AcquisitionGeometry:
+        """
+        Shift the geometry so that the center or origin maps to a target world coordinate.
+
+        Args:
+            target (Tensor): Target coordinate to shift to.
+            center (bool): If True, shift the center to the target point. Otherwise,
+                shift the origin to the target.
+
+        Returns:
+            AcquisitionGeometry: The shifted geometry.
+        """
+        target = torch.as_tensor(target, device=self.device)
+        current = self.center if center else self.origin
+        return self.shift(target - current, space='world')
 
     def scale(self, factor: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
         """
@@ -362,10 +392,10 @@ class AcquisitionGeometry(vx.AffineMatrix):
             AcquisitionGeometry: Resampled geometry.
         """
         if spacing is None and in_plane_spacing is None and slice_spacing is None:
-            raise ValueError('must provide either spacing, in_plane_spacing, or slice_spacing')
+            raise ValueError('must set target spacing, in_plane_spacing, or slice_spacing')
         if spacing is not None:
             if in_plane_spacing is not None or slice_spacing is not None:
-                raise ValueError('cannot provide spacing with in_plane_spacing or slice_spacing')
+                raise ValueError('cannot set spacing and in_plane_spacing, slice_spacing')
         else:
             spacing = self.spacing.clone()
             if in_plane_spacing is not None:
