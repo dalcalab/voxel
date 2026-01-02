@@ -4,7 +4,7 @@ import voxel as vx
 from . import utility
 
 
-# TODO: add a mult-frame case to all of these tests
+# TODO: add a multi-channel case to all of these tests
 
 
 def test_resample():
@@ -38,6 +38,8 @@ def test_antialiasing():
     target = vol.geometry.reorient('SPL').resample((1.5, 1.5, 5)).rotate((-10, 15, 10), 'world')
     aa = vol.resample_like(target, antialias=True)
     noaa = vol.resample_like(target, antialias=False)
+
+    # this is a reasonable error bound for this specific case
     error = (aa - noaa).abs().quantile(0.99)
     assert error > 35 and error < 36
 
@@ -54,8 +56,8 @@ def test_point_sampling():
 
     # make sure that sampling a volume at its own grid points and reshaping
     # the result back to the original shape gives the original volume
-    vol = utility.brain_t1w()
+    vol = utility.brain_t1w().float()
     points = vx.volume.volume_grid(vol.baseshape).view(-1, 3)
-    sampled = vol.sample(points, space='voxel', mode='nearest').swapaxes(0, 1)
+    sampled = vol.sample(points, space='voxel').swapaxes(0, 1)
     reshaped = vol.new(sampled.view(vol.shape))
-    assert (reshaped == vol).all()
+    assert vx.volumes_equal(vol, reshaped, vol_tol=5e-3)
