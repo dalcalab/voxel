@@ -4,6 +4,7 @@ Utilies for image grid filtering and kernel construction.
 
 from __future__ import annotations
 
+import math
 import torch
 
 
@@ -37,7 +38,8 @@ def gaussian_blur(
     sigma: list,
     batched: bool = False,
     truncate: float = 2,
-    padding_mode: str = 'replicate') -> torch.Tensor:
+    stride: float = None,
+    padding: str = 'same') -> torch.Tensor:
     """
     Apply Gaussian blurring to a data grid.
 
@@ -51,7 +53,8 @@ def gaussian_blur(
         batched (bool, optional): If True, assume image has a batch dimension.
         truncate (float, optional): The number of standard deviations to extend
             the kernel before truncating.
-        padding_mode (str, optional): The padding mode to use.
+        stride (float or list, optional): The stride to apply when downsampling the image.
+        padding (str, optional): The convolutional padding.
 
     Returns:
         Tensor: The blurred tensor with the same shape as the input tensor.
@@ -70,6 +73,14 @@ def gaussian_blur(
     if len(sigma) != ndim:
         raise ValueError(f'sigma must be {ndim}D, but got length {len(sigma)}')
 
+    # make sure strides match the ndim
+    if stride is not None:
+        stride = torch.as_tensor(stride)
+        if stride.ndim == 0:
+            stride = stride.repeat(ndim)
+        if len(stride) != ndim:
+            raise ValueError(f'stride must be {ndim}D, but got length {len(stride)}')
+
     blurred = image.float()
     if not batched:
         blurred = blurred.unsqueeze(0)
@@ -79,11 +90,20 @@ def gaussian_blur(
         # reuse previous kernel if we can
         if dim == 0 or s != sigma[dim - 1]:
             kernel = gaussian_kernel_1d(s, truncate, blurred.device, blurred.dtype)
-            kernel_size = len(kernel)
+
+        kernel_size = len(kernel)
+        current_stride = 1 if stride is None else stride[dim]
 
         # kernels are normalized. if the length is one, there's no point in using it
-        if kernel_size == 1:
+        if kernel_size == 1 and current_stride == 1:
+            # TODO: figure out correctly slicing for strides > 1 without using convolution
             continue
+
+        # set the stride for the current dimension
+        if current_stride > 1:
+            full_stride = [1 if d != dim else current_stride for d in range(ndim)]
+        else:
+            full_stride = 1
 
         # select the kernel for the current dimension
         kernel_shape = [kernel_size if i == dim + 2 else 1 for i in range(ndim + 2)]
@@ -94,22 +114,13 @@ def gaussian_blur(
         if num_channels > 1:
             kernel_dim = kernel_dim.expand((num_channels, *kernel_dim.shape[1:]))
 
-        # set the padding
-        if padding_mode == 'zeros':
-            padding = 'same'
-        else:
-            pad_size = kernel_size // 2
-            pad = [0] * (2 * ndim)
-            # note that padding is specified in reverse order
-            base = 2 * (ndim - dim - 1)
-            pad[base] = pad_size
-            pad[base + 1] = pad_size
-            blurred = torch.nn.functional.pad(blurred, pad, mode=padding_mode)
-            padding = 0
-
         # apply the convolution
         conv = getattr(torch.nn.functional, f'conv{ndim}d')
-        blurred = conv(blurred, kernel_dim, groups=num_channels, padding=padding)
+        blurred = conv(blurred,
+                       kernel_dim,
+                       groups=num_channels,
+                       stride=full_stride,
+                       padding=padding)
 
     if not batched:
         blurred = blurred.squeeze(0)
