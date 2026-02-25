@@ -114,6 +114,13 @@ class Volume:
         geometry = self.geometry if geometry is None else geometry
         return self.__class__(tensor, geometry)
 
+    def copy(self) -> Volume:
+        """
+        Copy the volume instance. Only the data tensor is copied,
+        not the underlying geometry.
+        """
+        return self.new(self.tensor.clone())
+
     def save(self, filename: os.PathLike, fmt: str = None) -> None:
         """
         Save the volume to a file.
