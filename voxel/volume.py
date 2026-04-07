@@ -1028,6 +1028,7 @@ class Volume:
                 minc = (minc - margin).clamp(min=0)
                 maxc = (maxc + margin).clamp(max=torch.tensor(self.baseshape))
                 slicing = (slicing[0], *vx.slicing.coordinates_to_slicing(minc, maxc, stride))
+
         else:
             raise ValueError(f'unknown cropping item: {type(cropping)}')
 

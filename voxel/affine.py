@@ -68,13 +68,15 @@ class AffineMatrix:
         tensor_str = tensor_str.replace('\n', f'\n{" " * (len(name) + 1)}')
         return f'{name}({tensor_str})'
 
-    def __matmul__(self, other: AffineMatrix | torch.Tensor) -> AffineMatrix | torch.Tensor:
-        isaffine = isinstance(other, AffineMatrix) or \
-                    (torch.is_tensor(other) and other.shape == (4, 4))
-        if isaffine:
-            other = AffineMatrix(other).tensor
-        result = self.tensor.to(other.device) @ other.type(self.tensor.dtype)
-        return AffineMatrix(result) if isaffine else result
+    def __matmul__(self, rhs: AffineMatrix | torch.Tensor) -> AffineMatrix | torch.Tensor:
+        rhs = rhs.tensor if isinstance(rhs, AffineMatrix) else rhs
+        result = self.tensor @ rhs.type(self.tensor.dtype)
+        return AffineMatrix(result) if result.shape == (4, 4) else result
+
+    def __rmatmul__(self, lhs: AffineMatrix | torch.Tensor) -> AffineMatrix | torch.Tensor:
+        lhs = lhs.tensor if isinstance(lhs, AffineMatrix) else lhs
+        result = lhs.type(self.tensor.dtype) @ self.tensor
+        return AffineMatrix(result) if result.shape == (4, 4) else result
 
     def _from_tensor_with_new_properties(self: T, tensor: torch.Tensor) -> T:
         """
