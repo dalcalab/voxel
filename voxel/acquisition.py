@@ -545,7 +545,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         returns:
             AcquisitionGeometry: Reshaped volume geometry.
         """
-        return self.pad(-margin, space)
+        return self.pad(-torch.as_tensor(margin), space)
 
     def bounds(self,
         margin: float | torch.Tensor = None,
