@@ -127,8 +127,8 @@ class NiftiArrayIO(IOProtocol):
 
         # 
         if not torch.isclose(volume.geometry.spacing, spacing, atol=0.01, rtol=0.2).all():
-            explicit_spacing = ', '.join([f'{s}:.2f' for s in spacing])
-            affine_spacing = ', '.join([f'{s}:.2f' for s in volume.geometry.spacing])
+            explicit_spacing = ', '.join([f'{s:.2f}' for s in spacing])
+            affine_spacing = ', '.join([f'{s:.2f}' for s in volume.geometry.spacing])
             print('Warning: There is a substantial difference between the explicit voxel '
                   f'spacing in the nifti header ({explicit_spacing}) and the '
                   f'computed spacing from the scanner affine ({affine_spacing})')
