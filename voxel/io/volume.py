@@ -123,15 +123,21 @@ class NiftiArrayIO(IOProtocol):
         volume = vx.Volume(features, affine)
 
         # 
-        volume.geometry.reference['nii'] = NiftiHeaderReference(nii)
+        if not torch.allclose(volume.geometry.spacing, spacing, atol=0.01, rtol=0.2):
+
+            explicit_spacing = ', '.join([f'{s:.2f}' for s in spacing])
+            affine_spacing = ', '.join([f'{s:.2f}' for s in volume.geometry.spacing])
+            warning = f'warning: explicit voxel spacing in the nifti header ({explicit_spacing}) ' \
+                      f'does not match scanner affine spacing ({affine_spacing})'
+
+            if torch.allclose(volume.geometry.tensor.abs(), torch.eye(4), atol=1e-5):
+                volume = vx.Volume(features, volume.geometry.scale(spacing, space='world'))
+                warning = f'{warning} - overwriting with explicit spacing'
+
+            print(warning)
 
         # 
-        if not torch.isclose(volume.geometry.spacing, spacing, atol=0.01, rtol=0.2).all():
-            explicit_spacing = ', '.join([f'{s}:.2f' for s in spacing])
-            affine_spacing = ', '.join([f'{s}:.2f' for s in volume.geometry.spacing])
-            print('Warning: There is a substantial difference between the explicit voxel '
-                  f'spacing in the nifti header ({explicit_spacing}) and the '
-                  f'computed spacing from the scanner affine ({affine_spacing})')
+        volume.geometry.reference['nii'] = NiftiHeaderReference(nii)
 
         # 
         return volume
