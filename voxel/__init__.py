@@ -20,6 +20,7 @@ from .acquisition import AcquisitionGeometry
 from .acquisition import Orientation
 from .acquisition import cast_orientation
 from .acquisition import cast_acquisition_geometry
+from .acquisition import geometries_equal
 
 from . import volume
 from .volume import Volume
