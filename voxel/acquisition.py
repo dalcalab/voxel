@@ -803,3 +803,24 @@ def cast_orientation(obj) -> Orientation:
     if isinstance(obj, Orientation):
         return obj
     return Orientation(obj)
+
+
+def geometries_equal(
+    a: AcquisitionGeometry,
+    b: AcquisitionGeometry,
+    tol: float = 1e-6) -> bool:
+    """
+    Check if two geometries are equal within a given tolerance.
+
+    Args:
+        a, b (AcquisitionGeometry): Geometries to compare.
+        tol (float, optional): Tolerance for matrix comparison.
+
+    Returns:
+        bool: True if the geometries are equal, False otherwise.
+    """
+    if a.baseshape != b.baseshape:
+        return False
+    if not a.tensor.allclose(b.tensor, atol=tol, rtol=0):
+        return False
+    return True
