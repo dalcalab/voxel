@@ -4,8 +4,8 @@ Utilies for image grid filtering and kernel construction.
 
 from __future__ import annotations
 
-import math
 import torch
+import voxel as vx
 
 
 def gaussian_kernel_1d(
@@ -126,6 +126,66 @@ def gaussian_blur(
         blurred = blurred.squeeze(0)
 
     return blurred
+
+
+def box_filter(
+    volume: vx.Volume,
+    size: float,
+    space: vx.Space,
+    padding_mode: str = 'replicate') -> vx.Volume:
+
+    # ensure size is only a single value
+    if isinstance(size, (list, tuple)):
+        raise ValueError(f'size must be a single value, but got {len(size)}')
+    elif isinstance(size, torch.Tensor) and size.ndim > 0:
+        raise ValueError(f'size must be a single value, but got shape {size.shape}')
+
+    # convert the size to world units
+    if vx.Space(space) == 'voxel':
+        size = size * volume.geometry.in_plane_spacing.mean()
+
+    # set the voxel kernel size to the nearest odd integer
+    kernel_size = size / volume.geometry.spacing
+    kernel_size = (torch.round((kernel_size - 1) / 2) * 2 + 1).int()
+
+    # don't apply the filter for volume dimensions of size 1
+    for i, s in enumerate(volume.baseshape):
+        if s == 1:
+            kernel_size[i] = 1
+
+    # initialize the kernel
+    kernel = torch.ones((1, 1, *kernel_size), device=volume.device, dtype=volume.dtype) / kernel_size.prod()
+
+    # if the kernel is just a single element, we can skip the convolution
+    if kernel.numel() == 1:
+        return volume
+    
+    # expand the kernel for multi-channel images
+    groups = volume.num_channels
+    if groups > 1:
+        kernel = kernel.expand((groups, *kernel.shape[1:]))
+
+    # apply the convolution
+    tensor = volume.tensor.unsqueeze(0)
+    if padding_mode == 'zeros':
+        result = torch.nn.functional.conv3d(input=tensor, weight=kernel, padding='same', groups=groups)
+    else:
+        tensor = torch.nn.functional.pad(tensor, same_padding(kernel_size), mode=padding_mode)
+        result = torch.nn.functional.conv3d(input=tensor, weight=kernel, groups=groups)
+    
+    return volume.new(result.squeeze(0))
+
+
+def same_padding(kernel_size: torch.Size) -> list[int]:
+    assert len(kernel_size) == 3
+    reversed_padding = [0, 0, 0, 0, 0, 0]
+    for r, k in enumerate(kernel_size):
+        i = 2 - r
+        total_padding = k - 1
+        left_pad = total_padding // 2
+        reversed_padding[2 * i] = left_pad
+        reversed_padding[2 * i + 1] = total_padding - left_pad
+    return reversed_padding
 
 
 def dilate(image: torch.Tensor, iterations: int = 1, batched: bool = False) -> torch.Tensor:
