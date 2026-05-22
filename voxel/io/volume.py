@@ -110,7 +110,7 @@ class NiftiArrayIO(IOProtocol):
         array = np.asanyarray(nii.dataobj)
 
         # not supported by torch
-        if array.dtype == np.uint16:
+        if array.dtype in (np.uint16, np.uint32):
             array = array.astype(np.int32)
 
         features = torch.from_numpy(array)
