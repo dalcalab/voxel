@@ -346,6 +346,53 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         return self._from_new_properties(matrix=matrix)
 
+    def shear(
+        self,
+        shear: torch.Tensor,
+        space: vx.Space,
+        corner: bool = False) -> AcquisitionGeometry:
+        """
+        Shear (skew) the acquisition geometry.
+
+        Args:
+            shear (Tensor): Shear factors of shape (3, 2).
+            space (Space): The space in which to apply the shear.
+            corner (bool, optional): Whether to shear around the image corner or center.
+                Only applicable when the space is 'voxel'. Defaults to False.
+
+        Returns:
+            AcquisitionGeometry: The sheared geometry.
+        """
+        shear = torch.as_tensor(shear, device=self.device)
+        if shear.numel() != 6:
+            raise ValueError('shear must have shape (3, 2) or contain 6 shear factors')
+
+        xy, xz, yx, yz, zx, zy = shear.flatten()
+
+        zero = torch.tensor(0, device=shear.device)
+        one  = torch.tensor(1, device=shear.device)
+
+        trf = torch.stack([
+            one,  xy,   xz,   zero,
+            yx,   one,  yz,   zero,
+            zx,   zy,   one,  zero,
+            zero, zero, zero, one]).view(4, 4)
+
+        if vx.Space(space) == 'world':
+            matrix = trf @ self.tensor
+        elif not corner:
+            center = (torch.tensor(self.baseshape, device=self.device) - 1) / 2
+            trf = (
+                vx.affine.translation_matrix(center)
+                @ trf
+                @ vx.affine.translation_matrix(-center)
+            )
+            matrix = self.tensor @ trf
+        else:
+            matrix = self.tensor @ trf
+
+        return self._from_new_properties(matrix=matrix)
+
     def reorient(self, target: vx.Orientation) -> AcquisitionGeometry:
         """
         Reorient the acquisition geometry to a new anatomical voxel orientation.
@@ -465,7 +512,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         slice_dim_pooling = spacing_ratio_thresh is None or self.spacing_ratio < spacing_ratio_thresh
 
         if not slice_dim_pooling:
-            factors[self.geometry.slice_direction] = 1
+            factors[self.slice_direction] = 1
 
         pooled_shape = [math.ceil(s / f) for s, f in zip(self.baseshape, factors)]
 
@@ -477,8 +524,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         # if the slice dimension was not pooled and the resulting slice spacing
         # is less than the in-plane spacing, we need to resample the slice dimension
         if not slice_dim_pooling and self.spacing_ratio < scale:
-            spacing = pooled.geometry.spacing.clone()
-            spacing[self.geometry.slice_direction] = spacing[self.geometry.in_plane_directions].mean()
+            spacing = pooled.spacing.clone()
+            spacing[self.slice_direction] = spacing[self.in_plane_directions].mean()
             pooled = pooled.resample(spacing)
 
         # sanity check
