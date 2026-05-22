@@ -191,6 +191,11 @@ class BoundingBox:
         Returns:
             BoundingBox: Bounding box with refit extent.
         """
+        if isinstance(points, BoundingBox):
+            points = points.corner_points()
+        elif isinstance(points, vx.AcquisitionGeometry):
+            points = points.bounds().vertices
+
         assert points.ndim == 2 and points.shape[1] == 3, "points should be of shape (N, 3)"
 
         # center points and project onto eigenvectors
