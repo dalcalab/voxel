@@ -480,8 +480,8 @@ class Volume:
         Returns:
             Volume: A new volume instance filled with zeros.
         """
-        if channels is None:
-            channels = self.num_channels
+        channels = channels or self.num_channels
+        dtype = dtype or self.dtype
         return self.geometry.zeros_like(channels, dtype=dtype)
 
     def ones_like(self,
@@ -499,8 +499,8 @@ class Volume:
         Returns:
             Volume: A new volume instance filled with ones.
         """
-        if channels is None:
-            channels = self.num_channels
+        channels = channels or self.num_channels
+        dtype = dtype or self.dtype
         return self.geometry.ones_like(channels, dtype=dtype)
 
     def full_like(self,
@@ -520,8 +520,8 @@ class Volume:
         Returns:
             Volume: A new filled volume instance.
         """
-        if channels is None:
-            channels = self.num_channels
+        channels = channels or self.num_channels
+        dtype = dtype or self.dtype
         return self.geometry.full_like(fill, channels, dtype=dtype)
 
     def rand_like(self,
@@ -540,8 +540,7 @@ class Volume:
         Returns:
             Volume: A new random volume instance.
         """
-        if channels is None:
-            channels = self.num_channels
+        channels = channels or self.num_channels
         return self.geometry.rand_like(channels, dtype=dtype)
 
     def randn_like(self,
@@ -560,8 +559,7 @@ class Volume:
         Returns:
             Volume: A new random volume instance.
         """
-        if channels is None:
-            channels = self.num_channels
+        channels = channels or self.num_channels
         return self.geometry.randn_like(channels, dtype=dtype)
 
     def isin(self, elements: torch.Tensor) -> Volume:
@@ -695,6 +693,9 @@ class Volume:
 
     def __setitem__(self, indexing, value) -> None:
         self.tensor[_cast_volume_as_tensor(indexing)] = _cast_volume_as_tensor(value)
+
+    def __contains__(self, item) -> bool:
+        return item in self.tensor
 
     # comparison operators
 
@@ -1095,6 +1096,7 @@ class Volume:
         target: Volume | vx.AcquisitionGeometry,
         mode: str = 'linear',
         padding_mode: str = 'zeros',
+        fill: float = 0,
         antialias: bool = False) -> Volume:
         """
         Resample the volume features to match the geometry of a target volume.
@@ -1103,6 +1105,7 @@ class Volume:
             target (Volume | AcquisitionGeometry): Target acquisition geometry.
             mode (str, optional): Interpolation mode.
             padding_mode (str, optional): Padding mode for outside grid values.
+            fill (float, optional): Out of bounds value used for fill padding mode.
             antialias (bool, optional): If True, will apply a Gaussian filter
                 before resampling to avoid aliasing artifacts.
 
@@ -1187,12 +1190,20 @@ class Volume:
         grid = volume_grid(intermediate_baseshape, transform=transform,
                            localshape=self.baseshape, device=self.device)
 
+        fill_out_of_bounds = padding_mode == 'fill'
+        if fill_out_of_bounds:
+            padding_mode = 'border'
+
         resampled = torch.nn.functional.grid_sample(
                         input=self.tensor.float().unsqueeze(0),
                         grid=grid.unsqueeze(0),
                         mode=('bilinear' if mode == 'linear' else mode),
                         padding_mode=padding_mode,
                         align_corners=False).squeeze(0)
+    
+        if fill_out_of_bounds:
+            out_of_bounds = (grid < -1).any(-1) | (grid > 1).any(-1)
+            resampled[out_of_bounds.unsqueeze(0)] = fill
 
         if antialias:
             resampled = vx.filters.gaussian_blur(resampled, sigma, stride=tuple(down_factor),
