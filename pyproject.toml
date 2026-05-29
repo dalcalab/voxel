@@ -3,17 +3,17 @@ name = 'voxel'
 description = 'Torch framework for volumetric medical imaging structures'
 readme = 'readme.md'
 keywords = ['medical imaging', 'deep-learning', 'AI', 'MRI']
+license = 'MIT'
 classifiers = [
     'Topic :: Scientific/Engineering',
     'Intended Audience :: Science/Research',
     'Programming Language :: Python :: 3',
-    'License :: OSI Approved :: MIT License',
     'Operating System :: OS Independent',
 ]
 authors = [
     {name = 'Andrew Hoopes'}
 ]
-requires-python = '>=3.8'
+requires-python = '>=3.9'
 dynamic = ['version']
 dependencies = [
     'numpy',
