@@ -805,6 +805,10 @@ class Volume:
         """
         if isinstance(points, vx.Mesh):
             points = points.vertices
+        
+        # original base shape
+        inshape = points.shape[:-1]
+        points = points.view(-1, 3)
 
         # convert to local coordinate space
         if vx.Space(space) == 'world':
@@ -824,7 +828,8 @@ class Volume:
             sampled = sampled.type(self.dtype)
 
         # remove batch and spatial dimensions
-        return sampled.squeeze(dim=(0, 3, 4)).swapaxes(0, 1)
+        sampled = sampled.squeeze(dim=(0, 3, 4)).swapaxes(0, 1)
+        return sampled.view(*inshape, sampled.size(-1))
 
     def tesselate(self, threshold: float = 0.5, space: vx.Space = 'world') -> vx.Mesh:
         """
