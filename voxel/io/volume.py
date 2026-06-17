@@ -23,9 +23,6 @@ def load_volume(filename: os.PathLike, fmt: str | None = None) -> vx.Volume:
 
     Returns:
         Volume: The loaded volume.
-
-    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
-    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     vx.io.utility.check_file_readability(filename)
 
@@ -34,7 +31,7 @@ def load_volume(filename: os.PathLike, fmt: str | None = None) -> vx.Volume:
         if proto is None:
             raise ValueError(f'cannot determine file format from extension for {filename}')
     else:
-        proto = vx.io.protocol.find_protocol_by_name(volume_io_protocols, fmt)
+        proto = vx.io.utility.find_protocol_by_name(volume_io_protocols, fmt)
         if proto is None:
             raise ValueError(f'unknown file format {fmt}')
 
@@ -50,16 +47,13 @@ def save_volume(volume: vx.Volume, filename: os.PathLike, fmt: str | None = None
         filename (PathLike): The path to the file to save.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
-
-    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
-    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     if fmt is None:
         proto = vx.io.utility.find_protocol_by_extension(volume_io_protocols, filename)
         if proto is None:
             raise ValueError(f'cannot determine file format from extension for {filename}')
     else:
-        proto = vx.io.protocol.find_protocol_by_name(volume_io_protocols, fmt)
+        proto = vx.io.utility.find_protocol_by_name(volume_io_protocols, fmt)
         if proto is None:
             raise ValueError(f'unknown file format {fmt}')
         filename = proto.enforce_extension(filename)

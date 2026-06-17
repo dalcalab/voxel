@@ -78,11 +78,8 @@ class IOProtocol:
 
         Raises:
             NotImplementedError: If the subclass does not implement this method.
-
-        BUG: this raises the `NotImplemented` constant rather than the
-        `NotImplementedError` exception, which itself raises a TypeError.
         """
-        raise NotImplemented(f'reading file format of {os.path.basename(filename)} is not implemented yet')
+        raise NotImplementedError(f'reading file format of {os.path.basename(filename)} is not implemented yet')
 
     def save(self, obj: object, filename: os.PathLike) -> None:
         """
@@ -94,11 +91,8 @@ class IOProtocol:
 
         Raises:
             NotImplementedError: If the subclass does not implement this method.
-
-        BUG: this raises the `NotImplemented` constant rather than the
-        `NotImplementedError` exception, which itself raises a TypeError.
         """
-        raise NotImplemented(f'writing file format of {os.path.basename(filename)} is not implemented yet')
+        raise NotImplementedError(f'writing file format of {os.path.basename(filename)} is not implemented yet')
 
 
 def find_protocol_by_name(protocols: list, fmt: str) -> IOProtocol | None:
