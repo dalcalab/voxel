@@ -7,24 +7,26 @@ from __future__ import annotations
 
 space_lookup = {
     'voxel': 'V',
-    'vox': 'V',
     'image': 'V',
     'world': 'W',
+}
+
+# reverse lookup mapping each space code to its canonical name
+space_names = {
+    'V': 'voxel',
+    'W': 'world',
 }
 
 
 class Space:
     """
     Designates either the voxel (image grid) or world coordinate space.
-
-    BUG: `__repr__` references `self._categories`, which is never defined.
     """
 
     def __init__(self, space: Space | str) -> None:
         """
         Args:
-            space (Space | str): Coordinate space. A string may be 'voxel'
-                (or 'vox'/'image') or 'world'.
+            space (Space | str): Coordinate space. A string may be 'voxel' or 'world'.
         """
         if isinstance(space, Space):
             self.code = space.code
@@ -35,7 +37,7 @@ class Space:
             self.code = match
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}('{self._categories[self.code]}')"
+        return f"Space('{space_names[self.code]}')"
 
     def __eq__(self, value: object) -> bool:
         if isinstance(value, Space):

@@ -776,9 +776,6 @@ class Orientation:
         """
         Args:
             item (str | AffineMatrix): Orientation string or affine matrix.
-
-        BUG: the final `else` branch uses `return ValueError(...)` instead of
-        `raise`, so an invalid type is silently ignored rather than rejected.
         """
 
         # this defines the axes of the anatomical world space. in the future, this
@@ -801,7 +798,7 @@ class Orientation:
             self.flip = tensor[self.dims, [0, 1, 2]].sign().int()
 
         else:
-            return ValueError(f'cannot create orientation from {type(item)}')
+            raise ValueError(f'cannot create orientation from {type(item)}')
 
     @property
     def name(self) -> str:
