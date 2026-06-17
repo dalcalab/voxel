@@ -1208,6 +1208,8 @@ class Volume:
     
         if fill_out_of_bounds:
             out_of_bounds = (grid < -1).any(-1) | (grid > 1).any(-1)
+            if isinstance(fill, torch.Tensor):
+                fill = fill.type(resampled.dtype)
             resampled[out_of_bounds.unsqueeze(0)] = fill
 
         if antialias:
@@ -1358,6 +1360,7 @@ class Volume:
     def pool(self,
         scale: int = 2,
         mode: str = 'mean',
+        space: vx.Space = 'voxel',
         spacing_ratio_thresh: float = None) -> Volume:
         """
         Pool the voxel data with a sliding window.
@@ -1386,9 +1389,9 @@ class Volume:
         Returns:
             Volume: Pooled volume.
         """
+        scale = self.geometry.conform_units(scale, space, 'voxel').round().int().clamp(min=1)
 
-        # dowsample factors for each dimension
-        factors = [1 if d == 1 else scale for d in self.baseshape]
+        factors = [min(d, int(s.item())) for s, d in zip(scale, self.baseshape)]
 
         # check if we should pool the slice dimension based on the spacing ratio threshold
         spacing_ratio = self.geometry.spacing_ratio
@@ -1414,7 +1417,7 @@ class Volume:
 
         # if the slice dimension was not pooled and the resulting slice spacing
         # is less than the in-plane spacing, we need to resample the slice dimension
-        if not slice_dim_pooling and spacing_ratio < scale:
+        if not slice_dim_pooling and spacing_ratio < scale[self.geometry.slice_direction]:
             spacing = pooled.geometry.spacing.clone()
             spacing[self.geometry.slice_direction] = spacing[self.geometry.in_plane_directions].mean()
             pooled = pooled.resample(spacing, padding_mode='border')

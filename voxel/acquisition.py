@@ -242,8 +242,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         target: vx.Space,
         num: int = None) -> torch.Tensor:
         """
-        Conform units to the voxel space. If the input space is 'world', the units are
-        converted to world space. Otherwise, the units are just conformed to length 3.
+        Conform units to a target space, e.g. if the input space is 'world', the units are
+        converted to world space. Scalars are repeated to length 3.
 
         Args:
             units (Tensor): Units of size $(1,)$ or $(3,)$ or $(3, N)$
@@ -253,7 +253,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
                 of the output tensor. If None, the output tensor will have shape $(3,)$.
         
         Returns:
-            Tensor: Units of size $(3, N)$ or $(3,)$ in voxel space.
+            Tensor: Units of size $(3, N)$ or $(3,)$ in target space.
         """
         units = torch.as_tensor(units, device=self.device).float()
 
@@ -477,6 +477,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def pool(self,
         scale: int = 2,
+        space: vx.Space = 'voxel',
         spacing_ratio_thresh: float = None) -> AcquisitionGeometry:
         """
         Pool the geometry with a sliding window.
@@ -504,9 +505,9 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Returns:
             AcquisitionGeometry: Pooled geometry.
         """
+        scale = self.conform_units(scale, space, 'voxel').round().int().clamp(min=1)
 
-        # dowsample factors for each dimension
-        factors = [1 if d == 1 else scale for d in self.baseshape]
+        factors = [min(d, int(s.item())) for s, d in zip(scale, self.baseshape)]
 
         # check if we should pool the slice dimension based on the spacing ratio threshold
         slice_dim_pooling = spacing_ratio_thresh is None or self.spacing_ratio < spacing_ratio_thresh
@@ -523,7 +524,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         # if the slice dimension was not pooled and the resulting slice spacing
         # is less than the in-plane spacing, we need to resample the slice dimension
-        if not slice_dim_pooling and self.spacing_ratio < scale:
+        if not slice_dim_pooling and self.spacing_ratio < scale[self.slice_direction]:
             spacing = pooled.spacing.clone()
             spacing[self.slice_direction] = spacing[self.in_plane_directions].mean()
             pooled = pooled.resample(spacing)
