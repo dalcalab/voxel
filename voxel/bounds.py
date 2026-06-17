@@ -10,27 +10,31 @@ import voxel as vx
 
 
 class BoundingBox:
+    """
+    An oriented 3D bounding box defined by a center, rotation, and extent.
+    """
 
     def __init__(self,
-        center: torch.Tensor = None,
-        rotation: torch.Tensor = None,
-        extent: torch.Tensor = None):
+        center: torch.Tensor | None = None,
+        rotation: torch.Tensor | None = None,
+        extent: torch.Tensor | None = None):
         """
         Args:
-            center (torch.Tensor): Center of the bounding box.
-            rotation (torch.Tensor): Rotation of the bounding box.
-            extent (torch.Tensor): Extents of the bounding box.
+            center (Tensor, optional): Box center of shape (3,). Defaults to the origin.
+            rotation (Tensor, optional): Box rotation matrix of shape (3, 3).
+                Defaults to the identity.
+            extent (Tensor, optional): Box half-lengths of shape (3,). Defaults to ones.
         """
         self.center = torch.zeros(3) if center is None else center
         self.rotation = torch.eye(3) if rotation is None else rotation
         self.extent = torch.ones(3) if extent is None else extent
 
-    def to(self, device: torch.Device) -> BoundingBox:
+    def to(self, device: torch.device) -> BoundingBox:
         """
         Move all bounding box parameters to a device.
 
         Args:
-            device: A torch device.
+            device (device): The target device.
 
         Returns:
             BoundingBox: A new bounding box instance.
@@ -113,13 +117,13 @@ class BoundingBox:
         
         return vx.Mesh(vertices, faces)
     
-    def geometry(self, spacing: torch.Tensor = None) -> vx.AcquisitionGeometry:
+    def geometry(self, spacing: torch.Tensor | None = None) -> vx.AcquisitionGeometry:
         """
         Construct an acquisition geometry from the bounding box.
 
         Args:
-            spacing (torch.Tensor): Desired voxel spacing of the geometry.
-        
+            spacing (Tensor, optional): Desired voxel spacing of the geometry. Defaults to ones.
+
         Returns:
             AcquisitionGeometry: Acquisition geometry.
         """
@@ -145,7 +149,7 @@ class BoundingBox:
 
         return vx.AcquisitionGeometry(baseshape, T)
 
-    def expand(self, margin: float = None, factor: float = None) -> BoundingBox:
+    def expand(self, margin: float | None = None, factor: float | None = None) -> BoundingBox:
         """
         Expand the bounding box by a margin or a factor.
 
@@ -233,8 +237,8 @@ def load_bounding_box(filename: pathlib.Path) -> BoundingBox:
 
     Args:
         filename (Path): Target file to load.
-    
-    returns:
+
+    Returns:
         BoundingBox: Loaded bounding box.
     """
     return BoundingBox(**torch.load(filename, weights_only=False))
@@ -302,7 +306,7 @@ def obbox_pca(points: torch.Tensor) -> BoundingBox:
     return BoundingBox(obb_center, eigenvectors, extent)
 
 
-def obbox_fine_tune(points: torch.Tensor, initial_rotation: torch.Tensor = None) -> BoundingBox:
+def obbox_fine_tune(points: torch.Tensor, initial_rotation: torch.Tensor | None = None) -> BoundingBox:
     """
     Fine-tune an oriented bounding box (OBB) to minimize the volume of the box
     enclosing a point cloud.

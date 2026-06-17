@@ -11,7 +11,7 @@ import voxel as vx
 
 class AcquisitionGeometry(vx.AffineMatrix):
     """
-    Geometry representating the linear relationship between volumetric
+    Geometry representing the linear relationship between volumetric
     image coordinates and a three-dimensional world space.
     """
 
@@ -69,8 +69,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         return self._baseshape
 
     def _from_new_properties(self,
-        baseshape: torch.Size = None,
-        matrix: torch.Tensor = None,
+        baseshape: torch.Size | None = None,
+        matrix: torch.Tensor | None = None,
         keep_explicit_slice_direction: bool = True,
         keep_reference: bool = False,
         ) -> AcquisitionGeometry:
@@ -199,11 +199,14 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def voxel_to_local_coordinates(self, coords: torch.Tensor) -> torch.Tensor:
         """
-        Transform voxel coordiates to flipped local grid coordinates in
-        the range [-1, 1]. These local coordinates are used for grid sampling in torch.
+        Transform voxel coordinates to flipped local grid coordinates in the
+        range [-1, 1], as used for grid sampling in torch.
+
+        Args:
+            coords (Tensor): Voxel coordinates of shape (..., 3).
 
         Returns:
-            torch.Tensor: Transformed local coordinates.
+            Tensor: Transformed local coordinates.
         """
         shape = torch.tensor(self.baseshape).to(coords.device)
         return ((2 * coords + 1) / shape - 1).flip(-1)
@@ -240,7 +243,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         units: torch.Tensor,
         source: vx.Space,
         target: vx.Space,
-        num: int = None) -> torch.Tensor:
+        num: int | None = None) -> torch.Tensor:
         """
         Conform units to a target space, e.g. if the input space is 'world', the units are
         converted to world space. Scalars are repeated to length 3.
@@ -428,12 +431,12 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Resample to a new voxel grid spacing.
 
         Args:
-            spacing (float |Tensor): Target voxel spacing. An isotropic target
+            spacing (float | Tensor): Target voxel spacing. An isotropic target
                 is assumed if a scalar is provided.
             in_plane_spacing (float | Tensor): Target in-plane voxel spacing. Mutually
                 exclusive with the `spacing` argument.
             slice_spacing (float | Tensor): Target slice spacing. Mutually exclusive
-                except with the `spacing` argument.
+                with the `spacing` argument.
 
         Returns:
             AcquisitionGeometry: Resampled geometry.
@@ -478,7 +481,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
     def pool(self,
         scale: int = 2,
         space: vx.Space = 'voxel',
-        spacing_ratio_thresh: float = None) -> AcquisitionGeometry:
+        spacing_ratio_thresh: float | None = None) -> AcquisitionGeometry:
         """
         Pool the geometry with a sliding window.
 
@@ -499,7 +502,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         Args:
             scale (int, optional): The size of the pooling window. Defaults to 2.
-            spacing_ratio_thresh (float, optional): Slice spacing ration that determines
+            space (Space, optional): Space of the scale value. Defaults to 'voxel'.
+            spacing_ratio_thresh (float, optional): Slice spacing ratio that determines
                 whether the slice dimension is pooled. This is disabled by default.
 
         Returns:
@@ -541,14 +545,14 @@ class AcquisitionGeometry(vx.AffineMatrix):
         center image to fit a given **baseshape**.
 
         This method is symmetric in that performing a reverse reshape operation
-        will always yeild the original geometry.
+        will always yield the original geometry.
 
-        args:
+        Args:
             baseshape (Size): Target spatial (3D) shape.
-            from_origin (bool, optional): If True, padding or cropped will be done
+            from_origin (bool, optional): If True, padding or cropping will be done
                 at the ends of the image shape and not centered.
-        
-        returns:
+
+        Returns:
             AcquisitionGeometry: Reshaped geometry.
         """
         baseshape = torch.Size(baseshape)
@@ -566,13 +570,13 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Pad the spatial extent of the volume geometry by a given margin. Note that
         a negative margin value will result in trimming (cropping).
 
-        args:
-            margin (float or Tensor, optional): Delta of specified units to
-                pad (or crop) the volume by in each direction. Can be of size
-                $(1,)$, $(3,)$, or $(3, 2)$.
+        Args:
+            margin (float or Tensor): Delta of specified units to pad (or crop)
+                the volume by in each direction. Can be of size $(1,)$, $(3,)$,
+                or $(3, 2)$.
             space (Space): The space of the margin, either 'voxel' or 'world'.
 
-        returns:
+        Returns:
             AcquisitionGeometry: Reshaped volume geometry.
         """
         margin = self.conform_units(margin, space, 'voxel', 2).cpu().round().int()
@@ -584,13 +588,12 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Trim the spatial extent of the volume geometry by a given margin. This is
         equivalent to padding with negative margin values.
 
-        args:
-            margin (float or Tensor, optional): Delta of specified units to
-                trim the volume by in each direction. Can be of size $(1,)$,
-                $(3,)$, or $(3, 2)$.
+        Args:
+            margin (float or Tensor): Delta of specified units to trim the volume
+                by in each direction. Can be of size $(1,)$, $(3,)$, or $(3, 2)$.
             space (Space): The space of the margin, either 'voxel' or 'world'.
 
-        returns:
+        Returns:
             AcquisitionGeometry: Reshaped volume geometry.
         """
         return self.pad(-torch.as_tensor(margin), space)
@@ -736,13 +739,13 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
 def cast_acquisition_geometry(obj: vx.Volume | AcquisitionGeometry) -> AcquisitionGeometry:
     """
-    Cast item to an AcquisitionGeometry
+    Cast an object to an AcquisitionGeometry.
 
     Args:
         obj (Volume | AcquisitionGeometry): Object to cast.
-    
+
     Returns:
-        AcquisitionGeometry
+        AcquisitionGeometry: The cast geometry.
     """
     if isinstance(obj, vx.Volume):
         return obj.geometry
@@ -773,6 +776,9 @@ class Orientation:
         """
         Args:
             item (str | AffineMatrix): Orientation string or affine matrix.
+
+        BUG: the final `else` branch uses `return ValueError(...)` instead of
+        `raise`, so an invalid type is silently ignored rather than rejected.
         """
 
         # this defines the axes of the anatomical world space. in the future, this
@@ -838,15 +844,15 @@ class Orientation:
         return views[vx.Orientation('SAR').dim_map(self)[dim]]
 
 
-def cast_orientation(obj) -> Orientation:
+def cast_orientation(obj: Orientation | str | vx.AffineMatrix) -> Orientation:
     """
-    Cast object to an Orientation instance.
+    Cast an object to an Orientation instance.
 
     Args:
-        obj (any): Object to cast.
-    
+        obj (Orientation | str | AffineMatrix): Object to cast.
+
     Returns:
-        Orientation: Casted orientation.
+        Orientation: The cast orientation.
     """
     if isinstance(obj, Orientation):
         return obj

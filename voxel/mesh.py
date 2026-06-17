@@ -11,11 +11,12 @@ import voxel as vx
 
 
 class Mesh:
+    """
+    A triangular mesh in 3D world space.
+    """
 
     def __init__(self, vertices: torch.Tensor, faces: torch.Tensor) -> None:
         """
-        Triangular mesh topology in 3D world space.
-
         Args:
             vertices (Tensor): Vertex coordinates of shape (V, 3).
             faces (Tensor): Triangular face integer indices of shape (F, 3).
@@ -78,18 +79,18 @@ class Mesh:
         return mesh
 
     @property
-    def device(self) -> torch.Device:
+    def device(self) -> torch.device:
         """
         The device of the mesh vertex and face tensors.
         """
         return self.vertices.device
 
-    def to(self, device: torch.Device) -> Mesh:
+    def to(self, device: torch.device) -> Mesh:
         """
-        Move the mesh (vertex and faces tensors) to a device.
+        Move the mesh (vertex and face tensors) to a device.
 
         Args:
-            device: A torch device.
+            device (device): The target device.
 
         Returns:
             Mesh: A new mesh instance.
@@ -103,7 +104,7 @@ class Mesh:
         Move the mesh vertex and face tensors to the CPU.
 
         Returns:
-            Mesh: A new mesh instance with with the data on the CPU.
+            Mesh: A new mesh instance with the data on the CPU.
         """
         return Mesh(self.vertices.cpu(), self.faces.cpu())
 
@@ -112,7 +113,7 @@ class Mesh:
         Move the mesh vertex and face tensors to the GPU.
 
         Returns:
-            Mesh: A new mesh instance with with the data on the GPU.
+            Mesh: A new mesh instance with the data on the GPU.
         """
         return Mesh(self.vertices.cuda(), self.faces.cuda())
 
@@ -128,7 +129,7 @@ class Mesh:
         """
         return self.new(self.vertices.type(dtype))
 
-    def save(self, filename: os.PathLike, fmt: str = None, **kwargs) -> None:
+    def save(self, filename: os.PathLike, fmt: str | None = None, **kwargs) -> None:
         """
         Save the mesh to a file.
 
@@ -136,14 +137,14 @@ class Mesh:
             filename (PathLike): The path to the file to save.
             fmt (str, optional): The format of the file. If None, the format is
                 determined by the file extension.
-            kwargs: Additional arguments passed to the file writing method.
+            **kwargs: Additional arguments passed to the file writing method.
         """
         vx.save_mesh(self, filename, fmt=fmt, **kwargs)
 
     @vx.caching.cached
     def triangles(self) -> torch.Tensor:
         """
-        Triangle coordinate arrary with shape (F, 3, 3).
+        Triangle coordinate array with shape (F, 3, 3).
         """
         return self.vertices[self.faces]
 
@@ -225,16 +226,16 @@ class Mesh:
         return indices, reverse, bidir_indices
 
     @vx.caching.cached_transferable
-    def unique_edges(self):
+    def unique_edges(self) -> torch.Tensor:
         """
         Unique bi-directional edges in the mesh, with shape (U, 2).
         """
         return self.edges[self.unique_edge_indices[0]]
 
     @vx.caching.cached_transferable
-    def adjacent_faces(self):
+    def adjacent_faces(self) -> torch.Tensor:
         """
-        Adjacent faces indices corresponding to each edge in `unique_edges`.
+        Adjacent face indices corresponding to each edge in `unique_edges`.
         """
         return self.edge_face[self.unique_edge_indices[2]]
 
@@ -296,6 +297,16 @@ class Mesh:
 
     def gather(self, features: torch.Tensor, reduce: str = 'mean') -> torch.Tensor:
         """
+        Gather and reduce neighboring vertex features across mesh edges, i.e. for
+        each vertex, combine the features of its adjacent vertices.
+
+        Args:
+            features (Tensor): Per-vertex features of shape $(V, C)$.
+            reduce (str, optional): Reduction applied over each vertex's neighbors,
+                e.g. 'mean', 'sum', 'amax', or 'amin'. Defaults to 'mean'.
+
+        Returns:
+            Tensor: Reduced per-vertex features matching the input shape.
         """
         edges = self.edges
         source = features[edges[:, 0]]
@@ -351,7 +362,7 @@ class Mesh:
         """
         return Mesh(transform.transform(self.vertices), self.faces)
 
-    def bounds(self, margin: float | torch.Tensor = None) -> Mesh:
+    def bounds(self, margin: float | torch.Tensor | None = None) -> Mesh:
         """
         Compute a box mesh enclosing the vertex bounds.
 

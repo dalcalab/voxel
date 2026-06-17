@@ -2,6 +2,8 @@
 Reading and writing meshes to various file formats.
 """
 
+from __future__ import annotations
+
 import os
 import numpy as np
 import torch
@@ -10,7 +12,7 @@ import voxel as vx
 from .utility import IOProtocol
 
 
-def load_mesh(filename: os.PathLike, fmt: str = None, **kwargs) -> vx.Mesh:
+def load_mesh(filename: os.PathLike, fmt: str | None = None, **kwargs) -> vx.Mesh:
     """
     Load a mesh from a file.
 
@@ -22,6 +24,9 @@ def load_mesh(filename: os.PathLike, fmt: str = None, **kwargs) -> vx.Mesh:
 
     Returns:
         Mesh: The loaded mesh.
+
+    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
+    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     vx.io.utility.check_file_readability(filename)
 
@@ -37,7 +42,7 @@ def load_mesh(filename: os.PathLike, fmt: str = None, **kwargs) -> vx.Mesh:
     return proto().load(filename, **kwargs)
 
 
-def save_mesh(mesh: vx.Mesh, filename: os.PathLike, fmt: str = None, **kwargs) -> None:
+def save_mesh(mesh: vx.Mesh, filename: os.PathLike, fmt: str | None = None, **kwargs) -> None:
     """
     Save a mesh to a file.
 
@@ -46,7 +51,10 @@ def save_mesh(mesh: vx.Mesh, filename: os.PathLike, fmt: str = None, **kwargs) -
         filename (PathLike): The path to the file to save.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
-        kwargs: Additional arguments to pass to the file writing method.
+        **kwargs: Additional arguments to pass to the file writing method.
+
+    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
+    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     if fmt is None:
         proto = vx.io.utility.find_protocol_by_extension(mesh_io_protocols, filename)
@@ -131,7 +139,7 @@ class StanfordPolygonIO(IOProtocol):
         Read mesh from a polygon file.
 
         Args:
-            filename (PathLike): The path to the wavefront file to read.
+            filename (PathLike): The path to the polygon file to read.
 
         Returns:
             Mesh: The loaded mesh.
@@ -142,18 +150,18 @@ class StanfordPolygonIO(IOProtocol):
     def save(self,
         mesh: vx.Mesh,
         filename: os.PathLike,
-        vertex_attributes: torch.Tensor = None,
-        face_attributes: torch.Tensor = None) -> None:
+        vertex_attributes: torch.Tensor | dict | None = None,
+        face_attributes: torch.Tensor | dict | None = None) -> None:
         """
         Write mesh to a polygon file.
 
         Args:
             mesh (Mesh): The mesh to save.
             filename (PathLike): Output path.
-            vertex_attributes (Tensor, optional): Dictionary of vertex attribute
-                tensors to save with the mesh.
-            face_attributes (Tensor, optional): Dictionary of face attribute tensors
-                to save with the mesh.
+            vertex_attributes (Tensor or dict, optional): A vertex attribute tensor,
+                or a dict mapping names to attribute tensors, to save with the mesh.
+            face_attributes (Tensor or dict, optional): A face attribute tensor,
+                or a dict mapping names to attribute tensors, to save with the mesh.
         """
         def prep_attributes(attributes):
             if not isinstance(attributes, dict):
@@ -208,7 +216,8 @@ class TorchMeshIO(IOProtocol):
 
 class AbstractTrimeshIO(IOProtocol):
     """
-    Mesh IO protocol for the Polygon File Format, a.k.a. Stanford PLY.
+    Abstract base IO protocol for mesh formats handled through trimesh.
+    Subclasses set the `name` and `extensions` members.
     """
     def __init__(self):
         try:

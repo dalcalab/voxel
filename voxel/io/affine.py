@@ -2,6 +2,8 @@
 Reading and writing affines to various file formats.
 """
 
+from __future__ import annotations
+
 import os
 import torch
 import voxel as vx
@@ -9,7 +11,7 @@ import voxel as vx
 from .utility import IOProtocol
 
 
-def load_affine(filename: os.PathLike, fmt: str = None) -> vx.AffineMatrix:
+def load_affine(filename: os.PathLike, fmt: str | None = None) -> vx.AffineMatrix:
     """
     Load an affine matrix from a file.
 
@@ -17,9 +19,12 @@ def load_affine(filename: os.PathLike, fmt: str = None) -> vx.AffineMatrix:
         filename (PathLike): The path to the file to load.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
-    
+
     Returns:
         AffineMatrix: The loaded affine matrix.
+
+    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
+    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     vx.io.utility.check_file_readability(filename)
 
@@ -35,7 +40,7 @@ def load_affine(filename: os.PathLike, fmt: str = None) -> vx.AffineMatrix:
     return proto().load(filename)
 
 
-def save_affine(affine: vx.AffineMatrix, filename: os.PathLike, fmt: str = None, **kwargs) -> None:
+def save_affine(affine: vx.AffineMatrix, filename: os.PathLike, fmt: str | None = None, **kwargs) -> None:
     """
     Save an affine matrix to a file.
 
@@ -44,7 +49,10 @@ def save_affine(affine: vx.AffineMatrix, filename: os.PathLike, fmt: str = None,
         filename (PathLike): The path to the file to save.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
-        kwargs: Additional arguments to pass to the file writing method.
+        **kwargs: Additional arguments to pass to the file writing method.
+
+    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
+    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     if fmt is None:
         proto = vx.io.utility.find_protocol_by_extension(affine_io_protocols, filename)

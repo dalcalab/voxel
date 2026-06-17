@@ -24,8 +24,8 @@ class AffineMatrix:
         device: torch.device | None = None) -> None:
         """
         Args:
-            data (Tensor, optional): A 3x3, 3x4, or 4x4 tensor. Default: if
-                None, the matrix is initialized with the identitiy.
+            data (Tensor, optional): A 3x3, 3x4, or 4x4 tensor. If None, the
+                matrix is initialized with the identity.
             device (device, optional): Device of the constructed matrix.
         """
         vx.caching.init_property_cache(self)
@@ -87,7 +87,7 @@ class AffineMatrix:
         """
         return self.__class__(tensor)
 
-    def save(self, filename: os.PathLike, fmt: str = None) -> None:
+    def save(self, filename: os.PathLike, fmt: str | None = None) -> None:
         """
         Save the affine matrix to a file.
 
@@ -107,12 +107,12 @@ class AffineMatrix:
         """
         return self._from_tensor_with_new_properties(self.tensor.detach())
 
-    def to(self: T, device: torch.Device) -> T:
+    def to(self: T, device: torch.device) -> T:
         """
         Move the matrix tensor to a device.
 
         Args:
-            device (Device): The target device.
+            device (device): The target device.
 
         Returns:
             A new affine with the matrix tensor on the target device.
@@ -151,7 +151,7 @@ class AffineMatrix:
         Apply the matrix transformation to a set of 3D coordinates.
 
         Args:
-            coordinates (Tensor): A tensor of coordinates with shape (..., 3).
+            coords (Tensor): A tensor of coordinates with shape (..., 3).
 
         Returns:
             Tensor: Transformed coordinates with the same shape as the input.
@@ -174,7 +174,7 @@ class AffineMatrix:
 class AffineVolumeTransform(AffineMatrix):
     """
     Affine transform matrix in world or voxel space that contains metadata
-    about the source and target acquistion geometry.
+    about the source and target acquisition geometry.
     """
 
     def __init__(self,
@@ -230,18 +230,17 @@ class AffineVolumeTransform(AffineMatrix):
         source: vx.AcquisitionGeometry | vx.Volume | None = None,
         target: vx.AcquisitionGeometry | vx.Volume | None = None) -> AffineVolumeTransform:
         """
-        Convert transform for a new set of coordinate space, source, or target.
+        Convert the transform to a new coordinate space, source, or target.
 
-        Parameters
-        ----------
-        space (Space, optional): Desired coordinate space.
-        source (AcquisitionGeometry or Volume, optional): Desired source geometry.
-        target (AcquisitionGeometry or Volume, optional): Desired target geometry.
+        Args:
+            space (Space, optional): Desired coordinate space.
+            source (AcquisitionGeometry or Volume, optional): Desired source geometry.
+            target (AcquisitionGeometry or Volume, optional): Desired target geometry.
 
         Returns:
             AffineVolumeTransform: Converted affine transform.
         """
-        
+
         # check if the desired space is the same as the embedded space
         space = self.space if space is None else vx.Space(space)
         same_space = space == self.space
@@ -330,12 +329,12 @@ def angles_to_rotation_matrix(
 
 
 def compose_affine(
-    translation : torch.Tensor = None,
-    rotation : torch.Tensor = None,
-    scale : torch.Tensor = None,
-    shear : torch.Tensor = None,
-    degrees : bool = True,
-    device : torch.device = None) -> AffineMatrix:
+    translation: torch.Tensor | None = None,
+    rotation: torch.Tensor | None = None,
+    scale: torch.Tensor | None = None,
+    shear: torch.Tensor | None = None,
+    degrees: bool = True,
+    device: torch.device | None = None) -> AffineMatrix:
     """
     Composes an affine matrix from a set of translation, rotation, scale,
     and shear transform components.
@@ -402,7 +401,7 @@ def random_affine(
     max_translation: float = 0,
     max_rotation: float = 0,
     max_scaling: float = 0,
-    device: torch.device = None) -> AffineMatrix:
+    device: torch.device | None = None) -> AffineMatrix:
     """
     Generate a random affine transformation matrix.
 
@@ -446,7 +445,7 @@ def random_affine(
 def least_squares_alignment(
     source: torch.Tensor | vx.Mesh,
     target: torch.Tensor | vx.Mesh,
-    weights: torch.Tensor = None,
+    weights: torch.Tensor | None = None,
     regularization: float = 1e-6) -> AffineMatrix:
     """
     Compute an affine least squares alignment between two 3D point sets.

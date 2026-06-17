@@ -78,6 +78,9 @@ class IOProtocol:
 
         Raises:
             NotImplementedError: If the subclass does not implement this method.
+
+        BUG: this raises the `NotImplemented` constant rather than the
+        `NotImplementedError` exception, which itself raises a TypeError.
         """
         raise NotImplemented(f'reading file format of {os.path.basename(filename)} is not implemented yet')
 
@@ -91,6 +94,9 @@ class IOProtocol:
 
         Raises:
             NotImplementedError: If the subclass does not implement this method.
+
+        BUG: this raises the `NotImplemented` constant rather than the
+        `NotImplementedError` exception, which itself raises a TypeError.
         """
         raise NotImplemented(f'writing file format of {os.path.basename(filename)} is not implemented yet')
 
@@ -144,7 +150,7 @@ def get_all_extensions(protocols: list) -> list:
     return extensions
 
 
-def numpy_to_tensor(x, dtype: torch.dtype = None, copy: bool = False) -> torch.Tensor:
+def numpy_to_tensor(x, dtype: torch.dtype | None = None, copy: bool = False) -> torch.Tensor:
     """
     Safely convert a numpy array to a tensor.
 

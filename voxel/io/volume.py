@@ -2,6 +2,8 @@
 Reading and writing image volumes to various file formats.
 """
 
+from __future__ import annotations
+
 import os
 import torch
 import numpy as np
@@ -10,7 +12,7 @@ import voxel as vx
 from .utility import IOProtocol
 
 
-def load_volume(filename: os.PathLike, fmt: str = None) -> vx.Volume:
+def load_volume(filename: os.PathLike, fmt: str | None = None) -> vx.Volume:
     """
     Load a volume from a file.
 
@@ -21,6 +23,9 @@ def load_volume(filename: os.PathLike, fmt: str = None) -> vx.Volume:
 
     Returns:
         Volume: The loaded volume.
+
+    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
+    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     vx.io.utility.check_file_readability(filename)
 
@@ -36,7 +41,7 @@ def load_volume(filename: os.PathLike, fmt: str = None) -> vx.Volume:
     return proto().load(filename)
 
 
-def save_volume(volume: vx.Volume, filename: os.PathLike, fmt: str = None) -> None:
+def save_volume(volume: vx.Volume, filename: os.PathLike, fmt: str | None = None) -> None:
     """
     Save a volume to a file.
 
@@ -45,6 +50,9 @@ def save_volume(volume: vx.Volume, filename: os.PathLike, fmt: str = None) -> No
         filename (PathLike): The path to the file to save.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
+
+    BUG: the explicit-format branch calls `vx.io.protocol.find_protocol_by_name`,
+    but there is no `vx.io.protocol` module (it lives in `vx.io.utility`).
     """
     if fmt is None:
         proto = vx.io.utility.find_protocol_by_extension(volume_io_protocols, filename)
@@ -61,11 +69,10 @@ def save_volume(volume: vx.Volume, filename: os.PathLike, fmt: str = None) -> No
 
 class NiftiHeaderReference:
     """
-    A reference to cache parameters of a nifti file header.
-    This is passed around in the metadata of an acquisition
-    geometry so that use it a reference (if needed) for resaving
-    a volume without introducing any corruptions to the original
-    file header.v
+    Caches the parameters of a nifti file header. This is carried in the
+    metadata of an acquisition geometry so that it can be used as a reference
+    (if needed) when resaving a volume, avoiding corruptions to the original
+    file header.
     """
 
     def __init__(self, nii) -> None:

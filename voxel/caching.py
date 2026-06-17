@@ -25,10 +25,12 @@ def cached(func: callable) -> property:
 
 def cached_transferable(func: callable) -> property:
     """
-    Decorator that converts a method into a cached property stored in
-    `self._transferable_property_cache`. The property is read-only.
-    A transferable property is a property that can be easily transferred
-    to a new instance of the same class.
+    Decorator that converts a method into a read-only cached property stored
+    in `self._transferable_property_cache`. A transferable property is one that
+    can be carried over to a new instance of the same class.
+
+    BUG: the wrapper checks membership against `_property_cache` but writes to
+    `_transferable_property_cache`, so the cached value is never reused.
     """
     @functools.wraps(func)
     def wrapper(self):
@@ -62,8 +64,7 @@ def transfer_property_cache(source: object, target: object) -> None:
 
 def empty_property_cache(obj: object) -> None:
     """
-    Clears the entire property cache for an object with
-    function using the `cached` decorator.
+    Clear the entire property cache for an object.
     """
     if hasattr(obj, '_property_cache'):
         obj._property_cache.clear()

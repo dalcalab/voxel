@@ -2,13 +2,15 @@
 Management of slicing tuples and indexing coordinates for tensors.
 """
 
+from __future__ import annotations
+
 import torch
 
 
 def coordinates_to_slicing(
     minc: torch.Tensor,
     maxc: torch.Tensor,
-    stride: torch.Tensor = None) -> tuple:
+    stride: torch.Tensor | None = None) -> tuple:
     """
     Converts min, max, and stride coordinates to a slicing tuple.
 
@@ -119,7 +121,7 @@ def slicing_to_coordinates(slicing: tuple, shape: tuple) -> tuple:
     return (minc, maxc, stride)
 
 
-def conform_coordinates(coords: torch.Tensor, num: int = None) -> torch.Tensor:
+def conform_coordinates(coords: torch.Tensor, num: int | None = None) -> torch.Tensor:
     """
     Conform coordinates to certain shape and dimensionality.
 

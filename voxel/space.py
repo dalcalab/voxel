@@ -15,13 +15,16 @@ space_lookup = {
 
 class Space:
     """
-    An object designating either the voxel (image grid) or world coordinate space.
+    Designates either the voxel (image grid) or world coordinate space.
+
+    BUG: `__repr__` references `self._categories`, which is never defined.
     """
 
     def __init__(self, space: Space | str) -> None:
         """
         Args:
-            space (Space | str): Coordinate space. If string, can be 'voxel' or 'world'.
+            space (Space | str): Coordinate space. A string may be 'voxel'
+                (or 'vox'/'image') or 'world'.
         """
         if isinstance(space, Space):
             self.code = space.code

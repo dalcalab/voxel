@@ -20,7 +20,7 @@ class Volume:
 
     def __init__(self,
         tensor: torch.Tensor,
-        geometry: vx.AcquisitionGeometry | vx.AffineMatrix = None) -> None:
+        geometry: vx.AcquisitionGeometry | vx.AffineMatrix | None = None) -> None:
         """
         Args:
             tensor (Tensor): Image data tensor of shape $(C, W, H, D)$ or $(W, H, D)$. 
@@ -101,7 +101,7 @@ class Volume:
 
     def new(self,
         tensor: torch.Tensor,
-        geometry: vx.AcquisitionGeometry = None) -> Volume:
+        geometry: vx.AcquisitionGeometry | None = None) -> Volume:
         """
         Construct a new volume instance with the provided features tensor, while
         preserving any unchanged properties of the original volume.
@@ -121,7 +121,7 @@ class Volume:
         """
         return self.new(self.tensor.clone())
 
-    def save(self, filename: os.PathLike, fmt: str = None) -> None:
+    def save(self, filename: os.PathLike, fmt: str | None = None) -> None:
         """
         Save the volume to a file.
 
@@ -157,12 +157,12 @@ class Volume:
         """
         return self.new(self.tensor.detach(), self.geometry.detach())
 
-    def to(self, device: torch.Device) -> Volume:
+    def to(self, device: torch.device) -> Volume:
         """
         Move the volume tensor to a device.
 
         Args:
-            device (Device): The target device.
+            device (device): The target device.
 
         Returns:
             Volume: A new volume instance with the tensor on the target device.
@@ -239,7 +239,7 @@ class Volume:
         """
         return self.new(self.tensor.bool())
 
-    def max(self, dim: int = None) -> Volume | torch.Tensor:
+    def max(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Get the maximum value in the volume tensor.
 
@@ -255,7 +255,7 @@ class Volume:
         reduced = self.tensor.amax(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def min(self, dim: int = None) -> Volume | torch.Tensor:
+    def min(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Get the minimum value in the volume features.
 
@@ -271,7 +271,7 @@ class Volume:
         reduced = self.tensor.amin(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def sum(self, dim: int = None) -> Volume | torch.Tensor:
+    def sum(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Compute the sum of all voxels.
 
@@ -287,7 +287,7 @@ class Volume:
         reduced = self.tensor.sum(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def mean(self, dim: int = None) -> Volume | torch.Tensor:
+    def mean(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Compute the mean of all voxels.
 
@@ -388,8 +388,8 @@ class Volume:
         return self.new(self.tensor.isnan())
 
     def clamp(self,
-        min: float = None,
-        max: float = None,
+        min: float | None = None,
+        max: float | None = None,
         inplace: bool = False) -> Volume:
         """
         Clamp the values in the volume tensor.
@@ -431,7 +431,7 @@ class Volume:
         """
         return self.new(self.tensor.minimum(other.tensor))
 
-    def all(self, dim: int = None) -> Volume | torch.Tensor:
+    def all(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Check if all elements in the volume are True.
 
@@ -448,7 +448,7 @@ class Volume:
         reduced = self.tensor.all(**kwargs)
         return self.new(reduced) if dim == 0 else reduced
 
-    def any(self, dim: int = None) -> Volume | torch.Tensor:
+    def any(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Check if any elements in the volume are True.
 
@@ -466,8 +466,8 @@ class Volume:
         return self.new(reduced) if dim == 0 else reduced
 
     def zeros_like(self,
-        channels: int = None,
-        dtype: torch.dtype = None) -> Volume:
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
         """
         Create a volume of zeros with the same geometry and
         device as the current instance.
@@ -485,8 +485,8 @@ class Volume:
         return self.geometry.zeros_like(channels, dtype=dtype)
 
     def ones_like(self,
-        channels: int = None,
-        dtype: torch.dtype = None) -> Volume:
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
         """
         Create a volume of ones with the same geometry and
         device as the current instance.
@@ -505,8 +505,8 @@ class Volume:
 
     def full_like(self,
         fill: float,
-        channels: int = None,
-        dtype: torch.dtype = None) -> Volume:
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
         """
         Create a volume filled with a specific value and with the same
         geometry and device as the current instance.
@@ -525,8 +525,8 @@ class Volume:
         return self.geometry.full_like(fill, channels, dtype=dtype)
 
     def rand_like(self,
-        channels: int = None,
-        dtype: torch.dtype = None) -> Volume:
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
         """
         Create a volume of random values with the same geometry and
         device as the current instance. Values are sampled from a uniform
@@ -544,8 +544,8 @@ class Volume:
         return self.geometry.rand_like(channels, dtype=dtype)
 
     def randn_like(self,
-        channels: int = None,
-        dtype: torch.dtype = None) -> Volume:
+        channels: int | None = None,
+        dtype: torch.dtype | None = None) -> Volume:
         """
         Create a volume of random values with the same geometry and
         device as the current instance. Values are sampled from a normal
@@ -590,13 +590,13 @@ class Volume:
         """
         return self.tensor.unique(**kwargs)
 
-    def quantile(self, q: torch.Tensor) -> torch.Tensor:
+    def quantile(self, q: float) -> torch.Tensor:
         """
-        Compute the q-th quantile of the voxel data. 
+        Compute the q-th quantile of the voxel data.
 
         Args:
             q (float): A scalar quantile in the range [0, 1].
-        
+
         Returns:
             Tensor: The quantile scalar value.
         """
@@ -616,12 +616,11 @@ class Volume:
 
     def softmax(self, dim: int = 0) -> Volume | torch.Tensor:
         """
-        Get the maximum index in the volume tensor.
+        Apply a softmax along a dimension of the volume tensor.
 
         Args:
-            dim (int, optional): The dimension or dimensions to
-                reduce. If the dimension is 0 (channel axis), a
-                single-channel volume is returned.
+            dim (int, optional): The dimension along which to apply the softmax.
+                Defaults to the channel axis (0), in which case a volume is returned.
 
         Returns:
             Tensor or Volume: Softmaxed probabilities.
@@ -629,7 +628,7 @@ class Volume:
         reduced = self.tensor.softmax(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def argmax(self, dim: int = None) -> Volume | torch.Tensor:
+    def argmax(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
         Get the maximum index in the volume tensor.
 
@@ -652,10 +651,10 @@ class Volume:
         Args:
             num_classes (int, optional): Total number of classes. If set to -1, the
                 number of classes will be inferred as one greater than the largest
-                class value in the input volume. 
+                class value in the input volume.
 
         Returns:
-            Tensor or Volume: The maximum indices or volume.
+            Volume: The one-hot encoded volume, with one channel per class.
         """
         assert self.num_channels == 1, f'cannot one hot volume with {self.num_channels} channels'
         assert not torch.is_floating_point(self.tensor), f'one hot requires volume of type int, got {self.dtype}'
@@ -866,7 +865,7 @@ class Volume:
 
     def bounds(self,
         nonzero: bool = False,
-        margin: float | torch.Tensor = None,
+        margin: float | torch.Tensor | None = None,
         space: vx.Space = 'world') -> vx.Mesh:
         """
         Compute a box mesh enclosing the bounds of the volume grid or the non-zero
@@ -971,7 +970,7 @@ class Volume:
 
     def crop(self,
         cropping: tuple | vx.Mesh,
-        margin: float | torch.Tensor = None,
+        margin: float | torch.Tensor | None = None,
         space: vx.Space = 'world') -> Volume:
         """
         Crop the volume to some bounding, either defined by a voxel slicing
@@ -1052,7 +1051,7 @@ class Volume:
                                                   slice_direction=geometry._explicit_slice_direction)
         return self.new(cropped_tensor, cropped_geometry)
 
-    def crop_to_nonzero(self, margin: float  | torch.Tensor = None) -> Volume:
+    def crop_to_nonzero(self, margin: float | torch.Tensor | None = None) -> Volume:
         """
         Crop the volume to the bounding box around nonzero voxels.
 
@@ -1259,10 +1258,10 @@ class Volume:
         This method is symmetric in that performing a reverse reshape operation
         will always yield the original geometry.
 
-        args:
-            baseshape (torch.Size): Target spatial (3D) shape.
+        Args:
+            baseshape (Size): Target spatial (3D) shape.
 
-        returns:
+        Returns:
             Volume: Reshaped volume instance.
         """
         return self.resample_like(self.geometry.reshape(baseshape), mode='nearest')
@@ -1272,15 +1271,15 @@ class Volume:
         Pad the spatial extent of the volume by a given delta. Note that
         a negative delta value will result in trimming (cropping).
 
-        args:
-            delta (float or Tensor, optional): Delta of specified units to
-                pad (or crop) the volume by in each direction. Can be of size
-                $(1,)$, $(3,)$, or $(3, 2)$.
+        Args:
+            delta (float or Tensor): Delta of specified units to pad (or crop)
+                the volume by in each direction. Can be of size $(1,)$, $(3,)$,
+                or $(3, 2)$.
             space (Space): The coordinate space of the delta values, either
                 'voxel' or 'world'.
 
-        returns:
-            Volume: Reshaped volume instance.
+        Returns:
+            Volume: Padded volume instance.
         """
         return self.resample_like(self.geometry.pad(delta, space), mode='nearest')
 
@@ -1289,15 +1288,14 @@ class Volume:
         Trim the spatial extent of the volume by a given delta. This is
         equivalent to padding with negative delta values.
 
-        args:
-            delta (float or Tensor, optional): Delta of specified units to
-                trim the volume by in each direction. Can be of size $(1,)$,
-                $(3,)$, or $(3, 2)$.
+        Args:
+            delta (float or Tensor): Delta of specified units to trim the volume
+                by in each direction. Can be of size $(1,)$, $(3,)$, or $(3, 2)$.
             space (Space): The coordinate space of the delta values, either
                 'voxel' or 'world'.
 
-        returns:
-            Volume: Reshaped volume instance.
+        Returns:
+            Volume: Trimmed volume instance.
         """
         return self.pad(-delta, space)
 
@@ -1320,6 +1318,7 @@ class Volume:
                 geometry so that image features do not move in world space. This option
                 can only be enabled when resampling is enabled.
             mode (str, optional): Interpolation mode if resampling.
+            padding_mode (str, optional): Padding mode for outside grid values if resampling.
 
         Returns:
             Volume: Transformed volume.
@@ -1361,7 +1360,7 @@ class Volume:
         scale: int = 2,
         mode: str = 'mean',
         space: vx.Space = 'voxel',
-        spacing_ratio_thresh: float = None) -> Volume:
+        spacing_ratio_thresh: float | None = None) -> Volume:
         """
         Pool the voxel data with a sliding window.
 
@@ -1383,7 +1382,8 @@ class Volume:
         Args:
             scale (int, optional): The size of the pooling window. Defaults to 2.
             mode (str, optional): Pooling mode - can be 'mean' or 'max'. Defaults to 'mean'.
-            spacing_ratio_thresh (float, optional): Slice spacing ration that determines
+            space (Space, optional): Space of the scale value. Defaults to 'voxel'.
+            spacing_ratio_thresh (float, optional): Slice spacing ratio that determines
                 whether the slice dimension is pooled. This is disabled by default.
 
         Returns:
@@ -1439,7 +1439,7 @@ class Volume:
         Args:
             sigma (float | Tensor): Smoothing sigma in world space units.
             truncate (float, optional): The number of standard deviations to extend
-            the kernel before truncating.
+                the kernel before truncating.
 
         Returns:
             Volume: Smoothed volume.
@@ -1469,20 +1469,19 @@ def _cast_volume_as_tensor(other: object) -> object:
 
 def volume_grid(
     baseshape: torch.Size,
-    transform: vx.AffineMatrix = None,
-    localshape: torch.Size = None,
-    device: torch.device = None) -> torch.Tensor:
+    transform: vx.AffineMatrix | None = None,
+    localshape: torch.Size | None = None,
+    device: torch.device | None = None) -> torch.Tensor:
     """
     Construct a grid of 3D voxel coordinates of the shape (W, H, D, 3).
 
     Args:
         baseshape (Size): Spatial (3D) shape of the volume grid.
         transform (AffineMatrix, optional): Grid voxel coordinate transform.
-        localshape (Size, optional): If True, the grid is normalized
-            between [1, -1] using the provided spatial shape and the
-            coordinate order is swapped (for torch sampling methods).
-        device (torch.device, optional): Device on which to
-            allocate the grid data.
+        localshape (Size, optional): If provided, the grid is normalized to the
+            range [-1, 1] using this spatial shape and the coordinate order is
+            swapped (for torch sampling methods).
+        device (device, optional): Device on which to allocate the grid data.
 
     Returns:
         Tensor: Grid volume tensor.
@@ -1497,13 +1496,13 @@ def volume_grid(
     return grid
 
 
-def stack(*vols):
+def stack(*vols) -> Volume:
     """
-    Concatenates (stacks) multiple volumes channel-wise. Assumes
-    volumes are in the same image space (with the same base shape).
+    Concatenate (stack) multiple volumes channel-wise. Assumes the volumes are
+    in the same image space (with the same base shape).
 
     Args:
-        *vols (sequence of Volumes): Volumes to merge.
+        *vols (Volume): Volumes to merge.
 
     Returns:
         Volume: Single channel-stacked volume instance.
