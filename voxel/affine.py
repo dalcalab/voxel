@@ -21,12 +21,15 @@ class AffineMatrix:
 
     def __init__(self,
         data: torch.Tensor | None = None,
-        device: torch.device | None = None) -> None:
+        device: torch.device | None = None,
+        dtype: torch.dtype = torch.float32) -> None:
         """
         Args:
             data (Tensor, optional): A 3x3, 3x4, or 4x4 tensor. If None, the
                 matrix is initialized with the identity.
             device (device, optional): Device of the constructed matrix.
+            dtype (dtype, optional): Data type of the constructed matrix.
+                Defaults to `float32`. Use `float64` to retain full-precision.
         """
         vx.caching.init_property_cache(self)
 
@@ -35,7 +38,7 @@ class AffineMatrix:
         elif isinstance(data, AffineMatrix):
             data = data.tensor
 
-        data = torch.as_tensor(data, device=device).float()
+        data = torch.as_tensor(data, device=device).to(dtype)
 
         if data.shape == (3, 3):
             row = torch.zeros((3, 1), dtype=data.dtype, device=data.device)
@@ -159,16 +162,12 @@ class AffineMatrix:
         if coords.shape[-1] != 3:
             raise ValueError('Coordinates must have a last dimension of size 3.')
 
-        # reshape to a 2D tensor for the transformation
-        coords_reshaped = coords.reshape(-1, 3)
-
-        # convert to homogeneous coordinates
-        ones = torch.ones((coords_reshaped.shape[0], 1), dtype=coords.dtype, device=coords.device)
-        coords_homogeneous = torch.cat((coords_reshaped, ones), dim=1)
-
-        # apply the transformation, convert back to cartesian, and reshape
-        transformed_coords = coords_homogeneous @ self.tensor.T.to(coords.device)
-        return transformed_coords[:, :3].reshape(coords.shape)
+        # split into linear and translation parts and apply directly over the
+        # trailing axis, broadcasting across any leading dimensions
+        matrix = self.tensor.to(coords.device)
+        linear = matrix[:3, :3].to(coords.dtype)
+        translation = matrix[:3, 3].to(coords.dtype)
+        return coords @ linear.T + translation
 
 
 class AffineVolumeTransform(AffineMatrix):
@@ -301,7 +300,8 @@ def translation_matrix(translation: torch.Tensor) -> AffineMatrix:
 
 def angles_to_rotation_matrix(
     rotation: torch.Tensor,
-    degrees: bool = True) -> AffineMatrix:
+    degrees: bool = True,
+    dtype: torch.dtype = torch.float32) -> AffineMatrix:
     """
     Compute a 3D rotation matrix from rotation angles.
 
@@ -310,22 +310,86 @@ def angles_to_rotation_matrix(
             angles are in degrees, otherwise they are in radians.
         degrees (bool, optional): Whether the angles are defined as degrees or,
             alternatively, as radians.
+        dtype (dtype, optional): Data type of the generated matrix. Defaults to
+            `float32`. Use `float64` to retain full-precision gradients.
 
     Returns:
         AffineMatrix: Rotation affine matrix.
     """
+    rotation = torch.as_tensor(rotation)
+    if not torch.is_floating_point(rotation):
+        rotation = rotation.double()
     if degrees:
         rotation = torch.deg2rad(rotation)
 
+    # TODO: this euler convention is non-standard - it matches the right-handed
+    # Rx @ Ry @ Rz composition but with the x and z angles negated (the rx/rz
+    # blocks below use the transposed sign), so it is inconsistent with the
+    # standard handedness of quaternion_to_rotation_matrix. Revisit and decide
+    # whether to switch to the standard right-handed convention (a breaking
+    # change for acquisition.py and bounds.py, which call this function).
+    zero = torch.zeros((), dtype=rotation.dtype, device=rotation.device)
+    one = torch.ones((), dtype=rotation.dtype, device=rotation.device)
+
     c, s = torch.cos(rotation[0]), torch.sin(rotation[0])
-    rx = torch.tensor([[1, 0, 0], [0, c, s], [0, -s, c]], dtype=torch.float64)
+    rx = torch.stack([
+        torch.stack([one, zero, zero]),
+        torch.stack([zero, c, s]),
+        torch.stack([zero, -s, c]),
+    ])
     c, s = torch.cos(rotation[1]), torch.sin(rotation[1])
-    ry = torch.tensor([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=torch.float64)
+    ry = torch.stack([
+        torch.stack([c, zero, s]),
+        torch.stack([zero, one, zero]),
+        torch.stack([-s, zero, c]),
+    ])
     c, s = torch.cos(rotation[2]), torch.sin(rotation[2])
-    rz = torch.tensor([[c, s, 0], [-s, c, 0], [0, 0, 1]], dtype=torch.float64)
+    rz = torch.stack([
+        torch.stack([c, s, zero]),
+        torch.stack([-s, c, zero]),
+        torch.stack([zero, zero, one]),
+    ])
     matrix = rx @ ry @ rz
 
-    return AffineMatrix(matrix.to(rotation.device))
+    return AffineMatrix(matrix, dtype=dtype)
+
+
+def quaternion_to_rotation_matrix(
+    quaternion: torch.Tensor,
+    dtype: torch.dtype = torch.float32) -> AffineMatrix:
+    """
+    Compute a 3D rotation matrix from a quaternion.
+
+    The quaternion is expected in scalar-first `(w, x, y, z)` order and is
+    normalized to unit length before the matrix is built, so any non-unit input
+    still yields a valid rotation.
+
+    Args:
+        quaternion (Tensor): Quaternion of shape (4,) in `(w, x, y, z)` order.
+            It need not be normalized.
+        dtype (dtype, optional): Data type of the generated matrix. Defaults to
+            `float32`. Use `float64` to retain full-precision gradients.
+
+    Returns:
+        AffineMatrix: Rotation affine matrix.
+    """
+    quaternion = torch.as_tensor(quaternion)
+    if not torch.is_floating_point(quaternion):
+        quaternion = quaternion.double()
+    if quaternion.shape != (4,):
+        raise ValueError('quaternion must be of shape (4,)')
+
+    # normalize to a unit quaternion so the result is a valid rotation
+    quaternion = quaternion / torch.linalg.norm(quaternion)
+    w, x, y, z = quaternion[0], quaternion[1], quaternion[2], quaternion[3]
+
+    matrix = torch.stack([
+        torch.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)]),
+        torch.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)]),
+        torch.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]),
+    ])
+
+    return AffineMatrix(matrix, dtype=dtype)
 
 
 def compose_affine(
@@ -334,67 +398,96 @@ def compose_affine(
     scale: torch.Tensor | None = None,
     shear: torch.Tensor | None = None,
     degrees: bool = True,
-    device: torch.device | None = None) -> AffineMatrix:
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32) -> AffineMatrix:
     """
     Composes an affine matrix from a set of translation, rotation, scale,
     and shear transform components.
 
     Args:
         translation (Tensor, optional): Translation vector.
-        rotation (Tensor, optional): Rotation angles.
+        rotation (Tensor, optional): Rotation, given either as euler angles of
+            shape (3,) or as a scalar-first `(w, x, y, z)` quaternion.
         scale (Tensor, optional): Scaling factors.
         shear (Tensor, optional): Shearing factors.
         degrees (bool, optional): Whether the rotation angles are in degrees.
         device (device, optional): Device of the generated matrix.
+        dtype (dtype, optional): Data type of the generated matrix. Defaults to
+            `float32`. Use `float64` to retain full-precision gradients.
 
     Returns:
         AffineMatrix: Composed affine matrix.
     """
-    # check translation
-    translation = torch.zeros(3) if translation is None else torch.as_tensor(translation)
-    if len(translation) != 3:
-        raise ValueError(f'translation must be of shape (3,)')
+    # prefer an input tensor's device when one is not explicitly provided
+    inputs = [t for t in (translation, rotation, scale, shear) if isinstance(t, torch.Tensor)]
+    if device is None and inputs:
+        device = inputs[0].device
 
-    # check rotation angles
-    rotation = torch.zeros(3) if rotation is None else torch.as_tensor(rotation)
-    if rotation.ndim == 0 or rotation.ndim != 0 and rotation.shape[0] != 3:
-        raise ValueError(f'rotation must be of shape (3,)')
+    def as_param(value: torch.Tensor) -> torch.Tensor:
+        # cast to float64 while keeping the value attached to the graph
+        return torch.as_tensor(value, device=device).double()
 
-    # check scaling factor
-    scale = torch.ones(3) if scale is None else torch.as_tensor(scale)
-    if scale.ndim == 0:
-        scale = scale.repeat(3)
-    if scale.shape[0] != 3:
-        raise ValueError(f'scale must be of size (3,)')
+    zero = torch.zeros((), dtype=torch.float64, device=device)
+    one = torch.ones((), dtype=torch.float64, device=device)
+    bottom = torch.tensor([[0, 0, 0, 1]], dtype=torch.float64, device=device)
 
-    # check shearing
-    shear = torch.zeros(3) if shear is None else torch.as_tensor(shear)
-    if shear.ndim == 0:
-        shear = shear.view(1)
-    if shear.shape[0] != 3:
-        raise ValueError(f'shear must be of shape (3,)')
+    def homogeneous(linear: torch.Tensor, trans: torch.Tensor) -> torch.Tensor:
+        # assemble a 4x4 matrix from a 3x3 linear block and a translation vector
+        top = torch.cat([linear, trans.unsqueeze(1)], dim=1)
+        return torch.cat([top, bottom], dim=0)
 
-    # start from translation
-    T = torch.eye(4, dtype=torch.float64)
-    T[:3, -1] = translation
+    # build only the requested components, preserving the T @ R @ Z @ S order
+    components = []
 
-    # rotation matrix
-    R = torch.eye(4, dtype=torch.float64)
-    R[:3, :3] = angles_to_rotation_matrix(rotation, degrees=degrees)[:3, :3]
+    # translation (with an identity linear block)
+    if translation is not None:
+        translation = as_param(translation)
+        if len(translation) != 3:
+            raise ValueError(f'translation must be of shape (3,)')
+        eye3 = torch.eye(3, dtype=torch.float64, device=device)
+        components.append(homogeneous(eye3, translation))
+
+    # rotation matrix; a length-3 input is treated as euler angles, while a
+    # length-4 input is treated as a scalar-first (w, x, y, z) quaternion
+    if rotation is not None:
+        rotation = as_param(rotation)
+        if rotation.ndim != 1 or rotation.shape[0] not in (3, 4):
+            raise ValueError(f'rotation must be of shape (3,) for angles or (4,) for a quaternion')
+        if rotation.shape[0] == 4:
+            R = quaternion_to_rotation_matrix(rotation, dtype=torch.float64)
+        else:
+            R = angles_to_rotation_matrix(rotation, degrees=degrees, dtype=torch.float64)
+        components.append(R.tensor)
 
     # scaling
-    Z = torch.diag(torch.cat([scale, torch.ones(1, dtype=torch.float64)]))
+    if scale is not None:
+        scale = as_param(scale)
+        if scale.ndim == 0:
+            scale = scale.repeat(3)
+        if scale.shape[0] != 3:
+            raise ValueError(f'scale must be of size (3,)')
+        components.append(torch.diag(torch.cat([scale, one.view(1)])))
 
     # shear matrix
-    S = torch.eye(4, dtype=torch.float64)
-    S[0][1] = shear[0]
-    S[0][2] = shear[1]
-    S[1][2] = shear[2]
+    if shear is not None:
+        shear = as_param(shear)
+        if shear.ndim == 0:
+            shear = shear.view(1)
+        if shear.shape[0] != 3:
+            raise ValueError(f'shear must be of shape (3,)')
+        shear_block = torch.stack([
+            torch.stack([one, shear[0], shear[1]]),
+            torch.stack([zero, one, shear[2]]),
+            torch.stack([zero, zero, one]),
+        ])
+        components.append(homogeneous(shear_block, torch.zeros(3, dtype=torch.float64, device=device)))
 
-    # compose component matrices
-    matrix = T @ R @ Z @ S
+    # compose the provided component matrices, defaulting to the identity
+    matrix = torch.eye(4, dtype=torch.float64, device=device)
+    for component in components:
+        matrix = matrix @ component
 
-    return AffineMatrix(torch.as_tensor(matrix, dtype=torch.float32, device=device))
+    return AffineMatrix(matrix, dtype=dtype)
 
 
 def random_affine(
@@ -477,7 +570,8 @@ def least_squares_alignment(
         W = torch.eye(len(source), device=source.device, dtype=source.dtype)
 
     #  extend source to shape (N, 4)
-    source = torch.cat([source, torch.ones(source.shape[0], 1, device=source.device)], dim=1)
+    ones = torch.ones(source.shape[0], 1, device=source.device, dtype=source.dtype)
+    source = torch.cat([source, ones], dim=1)
 
     # init regularization matrix
     R = regularization * torch.eye(4, device=source.device, dtype=source.dtype)
