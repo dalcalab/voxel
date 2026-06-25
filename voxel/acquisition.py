@@ -646,7 +646,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         maxc = points.amax(0).ceil().int() + 1
 
         if margin is not None:
-            margin = self.conform_units(margin, space, 'voxel', 2)
+            margin = self.conform_units(margin, space, 'voxel', 2).int()
             minc -= margin[:, 0]
             maxc += margin[:, 1]
 
