@@ -362,27 +362,19 @@ class Mesh:
         """
         return Mesh(transform.transform(self.vertices), self.faces)
 
-    def bounds(self, margin: float | torch.Tensor | None = None) -> Mesh:
+    def bounds(self, margin: float | torch.Tensor | None = None) -> vx.BoundingBox:
         """
-        Compute a box mesh enclosing the vertex bounds.
+        Compute the axis-aligned bounding box enclosing the mesh vertices.
 
         Args:
             margin (float or Tensor, optional): Margin (in vertex units) to expand
-                the cropping boundary. Can be a positive or negative delta.
+                the bounds. Can be a positive or negative delta.
 
         Returns:
-            Mesh: Bounding box mesh.
+            BoundingBox: Bounding box enclosing the vertices.
         """
-        min_point = self.vertices.amin(dim=0).float()
-        max_point = self.vertices.amax(dim=0).float()
-
-        # expand (or shrink) margin around border
-        if margin is not None:
-            margin = vx.slicing.conform_coordinates(margin, 2)
-            min_point -= margin[:, 0]
-            max_point += margin[:, 1]
-
-        return construct_box_mesh(min_point, max_point)
+        box = vx.BoundingBox.from_points(self.vertices.detach())
+        return box if margin is None else box.pad(margin)
 
     def extract_submesh(self, vertex_mask: torch.Tensor) -> Mesh:
         """
@@ -436,40 +428,3 @@ class Mesh:
         return vertex_mask
 
 
-def construct_box_mesh(min_point: torch.Tensor, max_point: torch.Tensor) -> Mesh:
-    """
-    Construct a rectangular box mesh from a lower and upper corner coordinate.
-
-    Args:
-        min_point (Tensor): Coordinate at the lower corner bound.
-        max_point (Tensor): Coordinate at the upper corner bound.
-
-    Returns:
-        Mesh: Rectangular mesh.
-    """
-    mask = torch.tensor([
-        [0, 0, 0],
-        [1, 0, 0],
-        [1, 1, 0],
-        [0, 1, 0],
-        [0, 0, 1],
-        [1, 0, 1],
-        [1, 1, 1],
-        [0, 1, 1]], device=min_point.device)
-
-    faces = torch.tensor([
-        [0, 1, 2],
-        [0, 2, 3],
-        [4, 5, 6],
-        [4, 6, 7],
-        [0, 1, 5],
-        [0, 5, 4],
-        [2, 3, 7],
-        [2, 7, 6],
-        [0, 3, 7],
-        [0, 7, 4],
-        [1, 2, 6],
-        [1, 6, 5]], device=min_point.device)
-
-    points = (mask == 0) * (min_point - 0.5) + mask * (max_point + 0.5)
-    return Mesh(points, faces)

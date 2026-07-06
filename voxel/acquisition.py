@@ -600,40 +600,105 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def bounds(self,
         margin: float | torch.Tensor = None,
-        space: vx.Space = 'world') -> vx.Mesh:
+        space: vx.Space = 'world') -> vx.BoundingBox:
         """
-        Compute a box mesh enclosing the bounds of the grid.
+        Compute a world-space bounding box enclosing the grid. The box covers
+        the full extent of the voxels, i.e. it is padded 0.5 voxels beyond the
+        outermost voxel centers on every side.
 
         Args:
-            margin (float or Tensor, optional): Margin to expand the cropping boundary.
+            margin (float or Tensor, optional): Margin to expand the bounds.
                 Can be a positive or negative delta.
             space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
 
         Returns:
-            Mesh: Bounding box mesh in world-space coordinates.
+            BoundingBox: Bounding box in world-space coordinates.
         """
-        minc = torch.zeros(3, device=self.device)
-        maxc = torch.tensor(self.baseshape, device=self.device).float() - 1
-        
+        shape = torch.tensor(self.baseshape, device=self.device).float()
+        box = vx.BoundingBox.from_min_max(torch.full_like(shape, -0.5), shape - 0.5)
+
         # expand (or shrink) margin around border
         if margin is not None:
-            margin = self.conform_units(margin, space, 'voxel', 2)
+            box = box.pad(self.conform_units(margin, space, 'voxel', 2))
+
+        # move the voxel-space box into world coordinates
+        return box.transform(self)
+
+    def _bounds_voxel_range(self,
+        bounds: vx.BoundingBox,
+        margin: float | torch.Tensor = None,
+        space: vx.Space = 'world',
+        clamp: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the inclusive integer voxel-coordinate range [minc, maxc] spanning
+        the voxel centers contained in a world-space bounding box.
+
+        Args:
+            bounds (BoundingBox): Bounding box in world-space coordinates.
+            margin (float or Tensor, optional): Margin to expand the range.
+                Can be a positive or negative delta.
+            space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
+            clamp (bool, optional): Whether to clamp the range to the grid extent,
+                raising an error if the box does not intersect the grid.
+
+        Returns:
+            tuple of Tensor: Minimum and maximum voxel coordinates.
+        """
+        if not isinstance(bounds, vx.BoundingBox):
+            raise TypeError(f'bounds must be a BoundingBox, got {type(bounds).__name__}')
+        points = self.inverse().transform(bounds.corner_points().detach())
+
+        # keep only voxel centers inside the box
+        minc = points.amin(0).ceil().int()
+        maxc = points.amax(0).floor().int()
+
+        if margin is not None:
+            margin = self.conform_units(margin, space, 'voxel', 2).round().int()
             minc -= margin[:, 0]
             maxc += margin[:, 1]
 
-        # build the world-space bounding box mesh
-        mesh = vx.mesh.construct_box_mesh(minc, maxc)
-        return mesh.transform(self)
+        if clamp:
+            shape = torch.tensor(self.baseshape, device=minc.device)
+            minc = minc.clamp(min=0)
+            maxc = maxc.clamp(max=shape - 1)
+            if (minc > maxc).any():
+                raise ValueError('bounding box does not intersect the grid extent')
 
-    def fit_to_bounds(self,
-        bounds: vx.Mesh,
+        return minc, maxc
+
+    def crop(self,
+        bounds: vx.BoundingBox,
         margin: float | torch.Tensor = None,
         space: vx.Space = 'world') -> AcquisitionGeometry:
         """
-        Fit the geometry to the bounds of a world-space mesh.
+        Crop the geometry grid to the voxel centers contained in a world-space
+        bounding box, clamped to the current grid extent. Use `fit_to_bounds` to
+        instead refit the grid without clamping.
 
         Args:
-            bounds (Mesh): Mesh defining the bounds to fit to.
+            bounds (BoundingBox): Bounding box to crop to.
+            margin (float or Tensor, optional): Margin to expand the cropping boundary.
+                Can be a positive or negative delta. The boundary will be clipped if
+                it extends beyond the shape of the grid.
+            space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
+
+        Returns:
+            AcquisitionGeometry: Cropped geometry.
+        """
+        minc, maxc = self._bounds_voxel_range(bounds, margin, space, clamp=True)
+        return self.shift(minc, 'voxel').reshape(maxc - minc + 1, from_origin=True)
+
+    def fit_to_bounds(self,
+        bounds: vx.BoundingBox,
+        margin: float | torch.Tensor = None,
+        space: vx.Space = 'world') -> AcquisitionGeometry:
+        """
+        Reposition and reshape the geometry grid to capture the voxel centers
+        contained in a world-space bounding box. Unlike `crop`, the grid is not
+        clamped to the current extent and may grow beyond it.
+
+        Args:
+            bounds (BoundingBox): Bounding box to fit to.
             margin (float or Tensor, optional): Margin to expand the bounding box
                 around the bounds. Can be a positive or negative delta.
             space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
@@ -641,16 +706,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Returns:
             AcquisitionGeometry: Reshaped geometry.
         """
-        points = self.inverse().transform(bounds.vertices.detach())
-        minc = points.amin(0).floor().int()
-        maxc = points.amax(0).ceil().int() + 1
-
-        if margin is not None:
-            margin = self.conform_units(margin, space, 'voxel', 2).int()
-            minc -= margin[:, 0]
-            maxc += margin[:, 1]
-
-        return self.shift(minc, 'voxel').reshape(maxc - minc, from_origin=True)
+        minc, maxc = self._bounds_voxel_range(bounds, margin, space)
+        return self.shift(minc, 'voxel').reshape(maxc - minc + 1, from_origin=True)
 
     def zeros_like(self,
         channels: int = 1,

@@ -863,46 +863,64 @@ class Volume:
             mesh = mesh.transform(self.geometry)
         return mesh
 
+    def _nonzero_voxel_range(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the inclusive voxel-coordinate range [minc, maxc] enclosing all
+        nonzero voxels across the volume channels.
+
+        Returns:
+            tuple of Tensor: Minimum and maximum voxel coordinates.
+        """
+        mask = self.tensor[0] != 0 if self.num_channels == 1 else (self.tensor != 0).any(dim=0)
+
+        # reduce to a boolean profile along each axis instead of materializing
+        # all nonzero coordinates, which is much slower for dense volumes
+        plane = mask.any(dim=2)
+        profiles = (plane.any(dim=1), plane.any(dim=0), mask.any(dim=0).any(dim=0))
+
+        coords = []
+        for profile in profiles:
+            indices = profile.nonzero()
+            if indices.shape[0] == 0:
+                raise ValueError('cannot compute nonzero bounds on an empty volume')
+            coords.append((indices[0, 0], indices[-1, 0]))
+
+        minc = torch.stack([c[0] for c in coords])
+        maxc = torch.stack([c[1] for c in coords])
+        return minc, maxc
+
     def bounds(self,
         nonzero: bool = False,
         margin: float | torch.Tensor | None = None,
-        space: vx.Space = 'world') -> vx.Mesh:
+        space: vx.Space = 'world') -> vx.BoundingBox:
         """
-        Compute a box mesh enclosing the bounds of the volume grid or the non-zero
-        voxels in the image.
+        Compute a world-space bounding box enclosing the volume grid or the
+        non-zero voxels in the image. The box covers the full extent of the
+        voxels, i.e. it is padded 0.5 voxels beyond the outermost voxel centers.
 
         Args:
             nonzero (bool): If True, compute the bounds around all non-zero voxels,
                 otherwise use the extent of the image grid.
-            margin (float or Tensor, optional): Margin to expand the cropping boundary.
+            margin (float or Tensor, optional): Margin to expand the bounds.
                 Can be a positive or negative delta.
             space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
 
         Returns:
-            Mesh: Bounding box mesh in world-space coordinates.
+            BoundingBox: Bounding box in world-space coordinates.
         """
-        if nonzero:
-            # compute the bounding box around all nonzero voxels
-            tensor = self.tensor if self.num_channels > 1 else self.tensor.sum(0)
-            nonzero = tensor.view(self.baseshape).nonzero()
-            if nonzero.shape[0] == 0:
-                raise ValueError('cannot compute nonzero bounds on an empty volume')
-            min_point = nonzero.amin(dim=0).float().cpu()
-            max_point = nonzero.amax(dim=0).float().cpu()
-        else:
-            # just use the bounds of the volume extent
-            min_point = torch.zeros(3)
-            max_point = torch.tensor(self.baseshape).float() - 1
+        if not nonzero:
+            return self.geometry.bounds(margin=margin, space=space)
+
+        # compute the bounding box around all nonzero voxels
+        minc, maxc = self._nonzero_voxel_range()
+        box = vx.BoundingBox.from_min_max(minc.float() - 0.5, maxc.float() + 0.5)
 
         # expand (or shrink) margin around border
         if margin is not None:
-            margin = self.geometry.conform_units(margin, space, 'voxel', 2).cpu()
-            min_point -= margin[:, 0]
-            max_point += margin[:, 1]
+            box = box.pad(self.geometry.conform_units(margin, space, 'voxel', 2))
 
-        # build the world-space bounding box mesh
-        mesh = vx.mesh.construct_box_mesh(min_point, max_point)
-        return mesh.transform(self.geometry)
+        # move the voxel-space box into world coordinates
+        return box.transform(self.geometry)
 
     def centroids(self, space: vx.Space) -> torch.Tensor:
         """
@@ -969,16 +987,16 @@ class Volume:
         return self[tuple(cropping)]
 
     def crop(self,
-        cropping: tuple | vx.Mesh,
+        cropping: tuple | vx.BoundingBox,
         margin: float | torch.Tensor | None = None,
         space: vx.Space = 'world') -> Volume:
         """
         Crop the volume to some bounding, either defined by a voxel slicing
-        tuple or a bounding box mesh.
+        tuple or a world-space bounding box.
 
         Args:
-            cropping (tuple or Mesh): Cropping defined by either a tuple of slices
-                or a bounding box mesh.
+            cropping (tuple or BoundingBox): Cropping defined by either a tuple
+                of slices or a bounding box.
             margin (float or Tensor, optional): Margin to expand the cropping boundary.
                 Can be a positive or negative delta. The boundary will be clipped if it
                 extends beyond the shape of the volume.
@@ -988,31 +1006,12 @@ class Volume:
         Returns:
             Volume: The cropped volume instance.
         """
+        stride = None
+        channels = slice(None)
 
-        # transform to voxel units
-        if margin is not None:
-            margin = self.geometry.conform_units(margin, space, 'voxel').cpu().round().int()
-
-        if isinstance(cropping, vx.Mesh):
-            # if we get a mesh as input, assume its a bounding box, but really
-            # any set of mesh points could work here
-            world2voxel = self.geometry.inverse()
-            points = world2voxel.transform(cropping.vertices.detach())
-            minc = points.amin(0).cpu().ceil().int()
-            maxc = points.amax(0).cpu().floor().int()
-
-            # extend the boundary
-            if margin is not None:
-                minc -= margin
-                maxc += margin
-
-            # make sure the coordinates are clamped within the volume extent
-            minc = minc.clamp(min=0)
-            maxc = maxc.clamp(max=torch.tensor(self.baseshape))
-            stride = None
-
-            # convert coordinate bounds to a 4D slicing tuple
-            slicing = (slice(None), *vx.slicing.coordinates_to_slicing(minc, maxc))
+        if isinstance(cropping, vx.BoundingBox):
+            # keep the voxel centers contained in the box, clamped to the grid
+            minc, maxc = self.geometry._bounds_voxel_range(cropping, margin, space, clamp=True)
 
         elif isinstance(cropping, (tuple, int, slice, type(...))):
 
@@ -1021,35 +1020,36 @@ class Volume:
                 cropping = (cropping,)
 
             # if we get a tuple assume its a tuple of slices
-            slicing = vx.slicing.expand_slicing(cropping, 4)
+            expanded = vx.slicing.expand_slicing(cropping, 4)
+            channels = expanded[0]
 
             # do not allow cropping to remove a spatial dimension
-            if any(isinstance(s, int) for s in slicing[1:]):
+            if any(isinstance(s, int) for s in expanded[1:]):
                 raise ValueError('cannot remove a spatial dimension when cropping a volume')
 
             # extend the boundary
-            minc, maxc, stride = vx.slicing.slicing_to_coordinates(cropping[1:], self.baseshape)
+            minc, maxc, stride = vx.slicing.slicing_to_coordinates(expanded[1:], self.baseshape)
             if margin is not None:
-                minc = (minc - margin).clamp(min=0)
-                maxc = (maxc + margin).clamp(max=torch.tensor(self.baseshape))
-                slicing = (slicing[0], *vx.slicing.coordinates_to_slicing(minc, maxc, stride))
+                margin = self.geometry.conform_units(margin, space, 'voxel', 2).cpu().round().int()
+                minc = (minc - margin[:, 0]).clamp(min=0)
+                maxc = (maxc + margin[:, 1]).clamp(max=torch.tensor(self.baseshape) - 1)
 
+        elif isinstance(cropping, vx.Mesh):
+            raise TypeError('cropping by mesh is no longer supported - use a '
+                            'bounding box, e.g. volume.crop(mesh.bounds())')
         else:
             raise ValueError(f'unknown cropping item: {type(cropping)}')
 
-        # update the geometry based on any inferred voxel shift or scale
-        geometry = self.geometry
-        if any(minc != 0):
-            geometry = geometry.shift(minc, space='voxel')
+        # apply the cropping
+        slicing = (channels, *vx.slicing.coordinates_to_slicing(minc, maxc, stride))
+        cropped_tensor = self.tensor[slicing]
+
+        # update the geometry based on the voxel shift, scale, and new shape
+        geometry = self.geometry.shift(minc, space='voxel')
         if stride is not None:
             geometry = geometry.scale(stride, space='voxel')
-
-        # apply the cropping
-        cropped_tensor = self.tensor[slicing]
-        cropped_geometry = vx.AcquisitionGeometry(baseshape=cropped_tensor.shape[-3:],
-                                                  matrix=geometry.tensor,
-                                                  slice_direction=geometry._explicit_slice_direction)
-        return self.new(cropped_tensor, cropped_geometry)
+        geometry = geometry.reshape(cropped_tensor.shape[-3:], from_origin=True)
+        return self.new(cropped_tensor, geometry)
 
     def crop_to_nonzero(self, margin: float | torch.Tensor | None = None) -> Volume:
         """
@@ -1063,12 +1063,12 @@ class Volume:
         Returns:
             Volume: The cropped volume instance.
         """
-        nonzero = self.tensor.nonzero()
-        # note: we're using nonzero() directly here instead of calling self.bounds() to avoid
-        # the unnecessary transformation into world space then back again)
-        minc = nonzero.amin(0)
-        maxc = nonzero.amax(0)
-        return self.crop(vx.slicing.coordinates_to_slicing(minc, maxc), margin=margin)
+        # note: we're using the voxel-space range directly here instead of calling
+        # self.bounds() to avoid the unnecessary transformation into world space
+        # then back again
+        minc, maxc = self._nonzero_voxel_range()
+        slicing = (slice(None), *vx.slicing.coordinates_to_slicing(minc, maxc))
+        return self.crop(slicing, margin=margin)
 
     def reorient(self, orientation: vx.Orientation) -> Volume:
         """

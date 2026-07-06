@@ -137,7 +137,7 @@ def conform_coordinates(coords: torch.Tensor, num: int | None = None) -> torch.T
     if coords.ndim == 0:
         coords = coords.repeat((3, num)) if num is not None else coords.repeat(3)
     elif coords.shape == (3,) and num is not None:
-        coords = coords.unsqueeze(1).repeat(1, 2)
+        coords = coords.unsqueeze(1).repeat(1, num)
     if num is not None and coords.shape != (3, num):
         raise ValueError(f'tensor must be of size (3, {num}) or (3,) or (1,), got {coords.shape}')
     if num is None and coords.shape != (3,):
