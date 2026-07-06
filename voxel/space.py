@@ -43,6 +43,5 @@ class Space:
         if isinstance(value, Space):
             return self.code == value.code
         elif isinstance(value, str):
-            return self.code == space_lookup[value]
-        else:
-            raise ValueError(f'cannot cast {type(value)} to space')
+            return self.code == space_lookup.get(value)
+        return NotImplemented
