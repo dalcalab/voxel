@@ -41,5 +41,3 @@ from .io.mesh import load_mesh
 from .io.mesh import save_mesh
 from .io.affine import load_affine
 from .io.affine import save_affine
-
-from . import registration

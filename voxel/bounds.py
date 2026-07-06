@@ -10,7 +10,7 @@ import voxel as vx
 
 
 # corner sign layout shared by corner_points() and the box face list below
-_CORNER_SIGNS = torch.tensor([
+CORNER_SIGNS = torch.tensor([
     [0, 0, 0],
     [1, 0, 0],
     [1, 1, 0],
@@ -22,7 +22,7 @@ _CORNER_SIGNS = torch.tensor([
     dtype=torch.float32) * 2 - 1
 
 # consistently outward-wound triangular faces for the corner order above
-_BOX_FACES = torch.tensor([
+BOX_FACES = torch.tensor([
     [0, 2, 1],
     [0, 3, 2],
     [4, 5, 6],
@@ -219,7 +219,7 @@ class BoundingBox:
             Tensor: Corner point tensor of shape (8, 3).
         """
         if self._corners is None:
-            signs = _CORNER_SIGNS.to(device=self.device, dtype=self._center.dtype)
+            signs = CORNER_SIGNS.to(device=self.device, dtype=self._center.dtype)
             self._corners = self._center + (signs * self._extent) @ self._rotation.T
         return self._corners
 
@@ -243,7 +243,7 @@ class BoundingBox:
         Returns:
             Mesh: Rectangular box mesh.
         """
-        faces = _BOX_FACES.to(self.device)
+        faces = BOX_FACES.to(self.device)
         # a reflected frame would flip the outward windings
         if torch.linalg.det(self._rotation) < 0:
             faces = faces.flip(-1)
@@ -612,8 +612,8 @@ def obbox_fine_tune(points: torch.Tensor, initial_rotation: torch.Tensor | None 
 
             # early stopping if flat improvement - the window was chosen somewhat arbitrarily
             window = 20
-            threshold = sum(history[-window:]) / window
-            if step > window and relative_cost > threshold:
+            recent = history[-window:]
+            if len(recent) == window and relative_cost > sum(recent) / window:
                 break
 
             history.append(relative_cost.item())

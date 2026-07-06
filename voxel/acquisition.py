@@ -267,12 +267,12 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         return vx.slicing.conform_coordinates(units, num)
 
-    def shift(self, delta: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
+    def shift(self, delta: torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
         """
         Shift, or translate, the acquisition geometry.
 
         Args:
-            delta (float or Tensor): The shift amount.
+            delta (Tensor): The translation vector of length 3.
             space (Space): The space in which to apply the shift.
 
         Returns:
