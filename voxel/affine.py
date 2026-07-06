@@ -305,8 +305,13 @@ def angles_to_rotation_matrix(
     """
     Compute a 3D rotation matrix from rotation angles.
 
+    Angles follow the standard right-handed convention (a positive rotation
+    about x carries +y toward +z) and are composed as `Rx @ Ry @ Rz`,
+    i.e. intrinsic x-y-z order, consistent with
+    `quaternion_to_rotation_matrix` and scipy's `Rotation.from_euler('XYZ')`.
+
     Args:
-        rotation (Tensor): Rotation angles. If `degrees` is True, the
+        rotation (Tensor): Rotation angles (x, y, z). If `degrees` is True, the
             angles are in degrees, otherwise they are in radians.
         degrees (bool, optional): Whether the angles are defined as degrees or,
             alternatively, as radians.
@@ -322,20 +327,14 @@ def angles_to_rotation_matrix(
     if degrees:
         rotation = torch.deg2rad(rotation)
 
-    # TODO: this euler convention is non-standard - it matches the right-handed
-    # Rx @ Ry @ Rz composition but with the x and z angles negated (the rx/rz
-    # blocks below use the transposed sign), so it is inconsistent with the
-    # standard handedness of quaternion_to_rotation_matrix. Revisit and decide
-    # whether to switch to the standard right-handed convention (a breaking
-    # change for acquisition.py and bounds.py, which call this function).
     zero = torch.zeros((), dtype=rotation.dtype, device=rotation.device)
     one = torch.ones((), dtype=rotation.dtype, device=rotation.device)
 
     c, s = torch.cos(rotation[0]), torch.sin(rotation[0])
     rx = torch.stack([
         torch.stack([one, zero, zero]),
-        torch.stack([zero, c, s]),
-        torch.stack([zero, -s, c]),
+        torch.stack([zero, c, -s]),
+        torch.stack([zero, s, c]),
     ])
     c, s = torch.cos(rotation[1]), torch.sin(rotation[1])
     ry = torch.stack([
@@ -345,8 +344,8 @@ def angles_to_rotation_matrix(
     ])
     c, s = torch.cos(rotation[2]), torch.sin(rotation[2])
     rz = torch.stack([
-        torch.stack([c, s, zero]),
-        torch.stack([-s, c, zero]),
+        torch.stack([c, -s, zero]),
+        torch.stack([s, c, zero]),
         torch.stack([zero, zero, one]),
     ])
     matrix = rx @ ry @ rz
