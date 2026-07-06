@@ -1453,79 +1453,79 @@ class Volume:
         """
         return vx.filters.gaussian_filter(self, sigma, space=space, truncate=truncate)
 
-    def dilate(self, iterations: int = 1, connectivity: int = 1) -> Volume:
+    def dilate(self,
+        iterations: int = 1,
+        connectivity: int = 1,
+        iso_thresh: float | None = None) -> Volume:
         """
         Apply a binary dilation to the nonzero voxels of the volume.
 
         Args:
             iterations (int, optional): Number of dilation iterations.
             connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+            iso_thresh (float, optional): Spacing ratio at or above which the
+                operation is applied only in-plane. Disabled by default.
 
         Returns:
             Volume: Dilated volume of the same data type.
         """
-        return vx.morphology.dilate(self, iterations, connectivity)
+        return vx.morphology.dilate(self, iterations, connectivity, iso_thresh)
 
-    def erode(self, iterations: int = 1, connectivity: int = 1) -> Volume:
+    def erode(self,
+        iterations: int = 1,
+        connectivity: int = 1,
+        iso_thresh: float | None = None) -> Volume:
         """
         Apply a binary erosion to the nonzero voxels of the volume.
 
         Args:
             iterations (int, optional): Number of erosion iterations.
             connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+            iso_thresh (float, optional): Spacing ratio at or above which the
+                operation is applied only in-plane. Disabled by default.
 
         Returns:
             Volume: Eroded volume of the same data type.
         """
-        return vx.morphology.erode(self, iterations, connectivity)
+        return vx.morphology.erode(self, iterations, connectivity, iso_thresh)
 
-    def connected_components(self, connectivity: int = 1, largest: bool = False) -> Volume:
+    def close(self,
+        iterations: int = 1,
+        connectivity: int = 1,
+        iso_thresh: float | None = None) -> Volume:
         """
-        Label the connected components of the nonzero voxels, sorted by
-        descending component size (the largest component has label 1).
-        Runs on the CPU and the result is moved back to the device.
+        Apply a binary closing (dilation followed by erosion) to the nonzero
+        voxels of the volume.
 
         Args:
+            iterations (int, optional): Number of dilation and erosion iterations.
             connectivity (int, optional): Neighborhood connectivity between 1 and 3.
-            largest (bool, optional): If True, only the largest component is kept.
+            iso_thresh (float, optional): Spacing ratio at or above which the
+                operation is applied only in-plane. Disabled by default.
 
         Returns:
-            Volume: Integer label map volume.
+            Volume: Closed volume of the same data type.
         """
-        return vx.morphology.connected_components(self, connectivity, largest)
+        return vx.morphology.close(self, iterations, connectivity, iso_thresh)
 
-    def flood_fill(self,
-        point: torch.Tensor,
-        space: vx.Space = 'voxel',
-        connectivity: int = 1) -> Volume:
+    def open(self,
+        iterations: int = 1,
+        connectivity: int = 1,
+        iso_thresh: float | None = None) -> Volume:
         """
-        Flood fill the volume from a seed point, extracting the connected
-        region of voxels that share the seed's value. Runs on the CPU and
-        the result is moved back to the device.
+        Apply a binary opening (erosion followed by dilation) to the nonzero
+        voxels of the volume.
 
         Args:
-            point (Tensor): A 3D seed coordinate.
-            space (Space, optional): The coordinate space of the seed point.
+            iterations (int, optional): Number of erosion and dilation iterations.
             connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+            iso_thresh (float, optional): Spacing ratio at or above which the
+                operation is applied only in-plane. Disabled by default.
 
         Returns:
-            Volume: Binary volume of the same data type marking the filled region.
+            Volume: Opened volume of the same data type.
         """
-        return vx.morphology.flood_fill(self, point, space, connectivity)
-
-    def fill_holes(self, connectivity: int = 1) -> Volume:
-        """
-        Fill enclosed background cavities (holes) in the nonzero regions
-        of the volume. Runs on the CPU and the result is moved back to
-        the device.
-
-        Args:
-            connectivity (int, optional): Neighborhood connectivity between 1 and 3.
-
-        Returns:
-            Volume: Binary volume of the same data type with holes filled.
-        """
-        return vx.morphology.fill_holes(self, connectivity)
+        return vx.morphology.open(self, iterations, connectivity, iso_thresh)
 
 
 def _cast_volume_as_tensor(other: object) -> object:
