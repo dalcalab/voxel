@@ -675,12 +675,7 @@ class Volume:
         # the same goes for boolean volume indexing (in which case we'll
         # just use the underlying tensor)
         elif isinstance(indexing, Volume):
-            indexing = indexing.tensor
-            # if we get a one-channel boolean mask for the indexing,
-            # we should auto-broadcast it to match the target channels
-            if indexing.shape[0] == 1 and self.num_channels > 1:
-                indexing = indexing.expand(self.num_channels, -1, -1, -1)
-            return self.tensor[indexing]
+            return self.tensor[self._conform_volume_mask(indexing)]
         elif isinstance(indexing, list):
             # a list of indices should be treated as a list of channel reshuffling indices
             if not all(isinstance(i, int) for i in indexing):
@@ -690,7 +685,17 @@ class Volume:
         # the crop function which actually returns a new volume
         return self.crop(indexing)
 
+    def _conform_volume_mask(self, indexing: Volume) -> torch.Tensor:
+        # if we get a one-channel boolean mask for the indexing,
+        # we should auto-broadcast it to match the target channels
+        indexing = indexing.tensor
+        if indexing.shape[0] == 1 and self.num_channels > 1:
+            indexing = indexing.expand(self.num_channels, -1, -1, -1)
+        return indexing
+
     def __setitem__(self, indexing, value) -> None:
+        if isinstance(indexing, Volume):
+            indexing = self._conform_volume_mask(indexing)
         self.tensor[_cast_volume_as_tensor(indexing)] = _cast_volume_as_tensor(value)
 
     def __contains__(self, item) -> bool:
@@ -1598,6 +1603,8 @@ def volumes_equal(
     Returns:
         bool: True if the volumes are equal, False otherwise.
     """
+    if a.tensor.shape != b.tensor.shape:
+        return False
     if not a.tensor.allclose(b.tensor, atol=vol_tol, rtol=0):
         return False
     if not a.geometry.tensor.allclose(b.geometry.tensor, atol=geom_tol, rtol=0):
