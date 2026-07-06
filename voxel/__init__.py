@@ -3,6 +3,7 @@ __version__ = '0.2.1'
 from . import caching
 from . import slicing
 from . import filters
+from . import morphology
 
 from . import space
 from .space import Space
@@ -29,6 +30,10 @@ from .volume import volumes_equal
 from . import mesh
 from .mesh import Mesh
 
+from . import snapshots
+from .snapshots import pca
+from .snapshots import snapshot
+
 from . import io
 from .io.volume import load_volume
 from .io.volume import save_volume
@@ -36,3 +41,5 @@ from .io.mesh import load_mesh
 from .io.mesh import save_mesh
 from .io.affine import load_affine
 from .io.affine import save_affine
+
+from . import registration

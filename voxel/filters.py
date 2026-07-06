@@ -1,5 +1,5 @@
 """
-Utilies for image grid filtering and kernel construction.
+Utilities for image grid filtering and kernel construction.
 """
 
 from __future__ import annotations
@@ -10,21 +10,21 @@ import voxel as vx
 
 def gaussian_kernel_1d(
     sigma: float,
-    truncate: float = 2,
+    truncate: float = 2.0,
     device: torch.device | None = None,
     dtype: torch.dtype | None = None) -> torch.Tensor:
     """
     Generate a 1D Gaussian kernel with a specified standard deviation.
 
     Args:
-        sigma (float): Standard deviations in element (voxel) space.
+        sigma (float): Standard deviation in element (voxel) space.
         truncate (float, optional): The number of standard deviations to extend
             the kernel before truncating.
         device (torch.device, optional): The device on which to create the kernel.
-        device (torch.dtype, optional): The kernel datatype.
+        dtype (torch.dtype, optional): The kernel datatype.
 
     Returns:
-        Tensor: A kernel of shape $2 * truncate * sigma + 1$.
+        Tensor: A normalized kernel of length $2 * int(truncate * sigma + 0.5) + 1$.
     """
     r = int(truncate * sigma + 0.5)
     x = torch.arange(-r, r + 1, device=device, dtype=dtype)
@@ -33,197 +33,203 @@ def gaussian_kernel_1d(
     return pdf / pdf.sum()
 
 
-def gaussian_blur(
-    image: torch.Tensor,
-    sigma: list,
-    batched: bool = False,
-    truncate: float = 2,
-    stride: float = None,
-    padding: str = 'same') -> torch.Tensor:
+def gaussian_filter(
+    volume: vx.Volume,
+    sigma: float | torch.Tensor,
+    space: vx.Space,
+    truncate: float = 2.0,
+    stride: int | torch.Tensor = 1,
+    separable: bool = True,
+    padding_mode: str = 'replicate') -> vx.Volume:
     """
-    Apply Gaussian blurring to a data grid.
-
-    The Gaussian filter is applied using convolution. The size of the filter kernel
-    is determined by the standard deviation and the truncation factor.
+    Apply Gaussian smoothing to a volume.
 
     Args:
-        image (Tensor): An image tensor with preceding channel dimensions. A
-            batch dimension can be included by setting `batched=True`.
-        sigma (float): Standard deviations in element (voxel) space.
-        batched (bool, optional): If True, assume image has a batch dimension.
+        sigma (float or Tensor): Standard deviation(s) of size $(1,)$ or $(3,)$.
+        space (Space): The space of the sigma values, either 'voxel' or 'world'.
         truncate (float, optional): The number of standard deviations to extend
             the kernel before truncating.
-        stride (float or list, optional): The stride to apply when downsampling the image.
-        padding (str, optional): The convolutional padding.
+        stride (int or Tensor, optional): Downsampling stride(s) in voxel units.
+        separable (bool, optional): Whether to filter with three separable 1D
+            kernels or a single dense 3D kernel. The results are equivalent.
+        padding_mode (str, optional): Border padding mode, e.g. 'replicate' or 'zeros'.
 
     Returns:
-        Tensor: The blurred tensor with the same shape as the input tensor.
+        Volume: Smoothed floating-point volume.
     """
-    ndim = image.ndim - (2 if batched else 1)
-
-    # sanity check for common mistake
-    if ndim == 4 and not batched:
-        raise ValueError(f'gaussian blur input has {image.ndim} dims, '
-                          'but batched option is False')
-
-    # make sure sigmas match the ndim
-    sigma = torch.as_tensor(sigma)
-    if sigma.ndim == 0:
-        sigma = sigma.repeat(ndim)
-    if len(sigma) != ndim:
-        raise ValueError(f'sigma must be {ndim}D, but got length {len(sigma)}')
-
-    # make sure strides match the ndim
-    if stride is not None:
-        stride = torch.as_tensor(stride)
-        if stride.ndim == 0:
-            stride = stride.repeat(ndim)
-        if len(stride) != ndim:
-            raise ValueError(f'stride must be {ndim}D, but got length {len(stride)}')
-
-    blurred = image.float()
-    if not batched:
-        blurred = blurred.unsqueeze(0)
-
-    for dim, s in enumerate(sigma):
-
-        # reuse previous kernel if we can
-        if dim == 0 or s != sigma[dim - 1]:
-            kernel = gaussian_kernel_1d(s, truncate, blurred.device, blurred.dtype)
-
-        kernel_size = len(kernel)
-        current_stride = 1 if stride is None else stride[dim]
-
-        # kernels are normalized. if the length is one, there's no point in using it
-        if kernel_size == 1 and current_stride == 1:
-            # TODO: figure out correctly slicing for strides > 1 without using convolution
-            continue
-
-        # set the stride for the current dimension
-        if current_stride > 1:
-            full_stride = [1 if d != dim else current_stride for d in range(ndim)]
-        else:
-            full_stride = 1
-
-        # select the kernel for the current dimension
-        kernel_shape = [kernel_size if i == dim + 2 else 1 for i in range(ndim + 2)]
-        kernel_dim = kernel.view(kernel_shape)
-
-        # expand the kernel for multi-channel images
-        num_channels = image.shape[0]
-        if num_channels > 1:
-            kernel_dim = kernel_dim.expand((num_channels, *kernel_dim.shape[1:]))
-
-        # apply the convolution
-        conv = getattr(torch.nn.functional, f'conv{ndim}d')
-        blurred = conv(blurred,
-                       kernel_dim,
-                       groups=num_channels,
-                       stride=full_stride,
-                       padding=padding)
-
-    if not batched:
-        blurred = blurred.squeeze(0)
-
-    return blurred
+    sigma = volume.geometry.conform_units(sigma, space, 'voxel')
+    kernels = [gaussian_kernel_1d(float(s), truncate, volume.device) if volume.baseshape[i] > 1
+               else torch.ones(1, device=volume.device) for i, s in enumerate(sigma)]
+    if not separable:
+        kernels = _dense_kernel(kernels)
+    return apply_filter(volume, kernels, stride=stride, padding_mode=padding_mode)
 
 
 def box_filter(
     volume: vx.Volume,
-    size: float,
+    size: float | torch.Tensor,
     space: vx.Space,
+    stride: int | torch.Tensor = 1,
+    separable: bool = True,
     padding_mode: str = 'replicate') -> vx.Volume:
+    """
+    Apply mean filtering to a volume with a box kernel.
 
-    # ensure size is only a single value
-    if isinstance(size, (list, tuple)):
-        raise ValueError(f'size must be a single value, but got {len(size)}')
-    elif isinstance(size, torch.Tensor) and size.ndim > 0:
-        raise ValueError(f'size must be a single value, but got shape {size.shape}')
+    The box extent is rounded to the nearest odd number of voxels along
+    each dimension.
 
-    # convert the size to world units
-    if vx.Space(space) == 'voxel':
-        size = size * volume.geometry.in_plane_spacing.mean()
+    Args:
+        size (float or Tensor): Box extent(s) of size $(1,)$ or $(3,)$.
+        space (Space): The space of the size values, either 'voxel' or 'world'.
+        stride (int or Tensor, optional): Downsampling stride(s) in voxel units.
+        separable (bool, optional): Whether to filter with three separable 1D
+            kernels or a single dense 3D kernel. The results are equivalent.
+        padding_mode (str, optional): Border padding mode, e.g. 'replicate' or 'zeros'.
 
-    # set the voxel kernel size to the nearest odd integer
-    kernel_size = size / volume.geometry.spacing
-    kernel_size = (torch.round((kernel_size - 1) / 2) * 2 + 1).int()
+    Returns:
+        Volume: Filtered floating-point volume.
+    """
+    size = volume.geometry.conform_units(size, space, 'voxel')
+    kernel_size = (torch.round((size - 1) / 2) * 2 + 1).int().clamp(min=1)
 
-    # don't apply the filter for volume dimensions of size 1
+    # don't filter volume dimensions of size 1
     for i, s in enumerate(volume.baseshape):
         if s == 1:
             kernel_size[i] = 1
 
-    # initialize the kernel
-    kernel = torch.ones((1, 1, *kernel_size), device=volume.device, dtype=volume.dtype) / kernel_size.prod()
-
-    # if the kernel is just a single element, we can skip the convolution
-    if kernel.numel() == 1:
-        return volume
-    
-    # expand the kernel for multi-channel images
-    groups = volume.num_channels
-    if groups > 1:
-        kernel = kernel.expand((groups, *kernel.shape[1:]))
-
-    # apply the convolution
-    tensor = volume.tensor.unsqueeze(0)
-    if padding_mode == 'zeros':
-        result = torch.nn.functional.conv3d(input=tensor, weight=kernel, padding='same', groups=groups)
-    else:
-        tensor = torch.nn.functional.pad(tensor, same_padding(kernel_size), mode=padding_mode)
-        result = torch.nn.functional.conv3d(input=tensor, weight=kernel, groups=groups)
-    
-    return volume.new(result.squeeze(0))
+    kernels = [torch.ones(int(k), device=volume.device) / int(k) for k in kernel_size]
+    if not separable:
+        kernels = _dense_kernel(kernels)
+    return apply_filter(volume, kernels, stride=stride, padding_mode=padding_mode)
 
 
-def same_padding(kernel_size: torch.Size) -> list[int]:
-    assert len(kernel_size) == 3
-    reversed_padding = [0, 0, 0, 0, 0, 0]
-    for r, k in enumerate(kernel_size):
-        i = 2 - r
-        total_padding = k - 1
-        left_pad = total_padding // 2
-        reversed_padding[2 * i] = left_pad
-        reversed_padding[2 * i + 1] = total_padding - left_pad
-    return reversed_padding
-
-
-def dilate(image: torch.Tensor, iterations: int = 1, batched: bool = False) -> torch.Tensor:
+def apply_filter(
+    volume: vx.Volume,
+    kernel: torch.Tensor | list,
+    stride: int | torch.Tensor = 1,
+    padding_mode: str = 'replicate') -> vx.Volume:
     """
-    Apply a binary dilation operation to a data grid.
+    Apply a filter kernel to a volume with 'same'-style output extents.
+
+    Channels are filtered independently. When strided, the grid is downsampled
+    to a spatial size of $ceil(baseshape / stride)$ and the volume geometry is
+    updated to reflect the new voxel spacing.
 
     Args:
-        image (Tensor): An image tensor with preceding channel dimensions. A
-            batch dimension can be included by setting `batched=True`.
-        iterations (int, optional): The number of dilation iterations.
-        batched (bool, optional): If True, assume image has a batch dimension.
+        kernel (Tensor or list): A single dense 3D kernel of shape $(W, H, D)$
+            or a sequence of three 1D kernels applied separably per dimension.
+        stride (int or Tensor, optional): Downsampling stride(s) in voxel units.
+        padding_mode (str, optional): Border padding mode, e.g. 'replicate' or 'zeros'.
 
     Returns:
-        Tensor: The dilated tensor with the same shape as the input tensor.
+        Volume: Filtered floating-point volume.
     """
-    ndim = image.ndim - (2 if batched else 1)
+    stride = torch.as_tensor(stride)
+    stride = [int(s) for s in (stride.repeat(3) if stride.ndim == 0 else stride)]
 
-    # sanity check for common mistake
-    if ndim == 4 and not batched:
-        raise ValueError(f'dilate input has {image.ndim} dims, '
-                          'but batched option is False')
+    kernels = [kernel] if torch.is_tensor(kernel) else list(kernel)
+    kernel_size = list(kernels[0].shape) if len(kernels) == 1 else [k.numel() for k in kernels]
 
-    dilated = image.float()
-    if not batched:
-        dilated = dilated.unsqueeze(0)
+    # skip the convolution entirely for an identity kernel
+    if all(s == 1 for s in stride) and all(k.numel() == 1 for k in kernels) and \
+       all(float(k.flatten()[0]) == 1 for k in kernels):
+        return volume
 
-    kernel = torch.zeros([3] * ndim, device=dilated.device, dtype=dilated.dtype)
-    for dim in range(ndim):
-        slices = [slice(None)] * ndim
-        slices[dim] = 1
-        kernel[tuple(slices)] = 1
-    kernel = kernel.view(1, 1, *kernel.shape)
+    result = _filter_tensor(volume.tensor, kernel, stride=stride, padding_mode=padding_mode)
 
-    conv = getattr(torch.nn.functional, f'conv{ndim}d')
-    for _ in range(iterations):
-        dilated = conv(dilated, kernel, groups=image.shape[0], padding='same')
+    # unstrided, odd-sized kernels preserve the grid and therefore the geometry
+    if all(s == 1 for s in stride) and all(k % 2 == 1 for k in kernel_size):
+        geometry = volume.geometry
+    else:
+        # even kernels pad asymmetrically (less on the low side), which shifts
+        # the effective window center by half a voxel
+        offset = [(k - 1) / 2 - (k - 1) // 2 for k in kernel_size]
+        geometry = volume.geometry.shift(offset, 'voxel').scale(stride, 'voxel')
+        geometry = geometry.reshape(result.shape[-3:], from_origin=True)
 
-    if not batched:
-        dilated = dilated.squeeze(0)
+    return volume.new(result, geometry)
 
-    return (dilated > 0).to(image.dtype)
+
+def _filter_tensor(
+    tensor: torch.Tensor,
+    kernel: torch.Tensor | list,
+    stride: int | torch.Tensor = 1,
+    padding: str = 'same',
+    padding_mode: str = 'replicate') -> torch.Tensor:
+    """
+    Convolve a channeled $(C, W, H, D)$ tensor with a dense 3D kernel or a
+    sequence of three separable 1D kernels.
+
+    Padding is applied to the input once up front, so separable and dense
+    filtering remain numerically equivalent for any padding mode.
+
+    Args:
+        kernel (Tensor or list): A single dense 3D kernel of shape $(W, H, D)$
+            or a sequence of three 1D kernels applied separably per dimension.
+        stride (int or Tensor, optional): Downsampling stride(s) in voxel units.
+        padding (str, optional): Output extent style, either 'same' or 'valid'.
+        padding_mode (str, optional): Border padding mode, e.g. 'replicate' or 'zeros'.
+
+    Returns:
+        Tensor: Filtered floating-point tensor of shape $(C, W, H, D)$.
+    """
+    if tensor.ndim != 4:
+        raise ValueError(f'expected a 4D (C, W, H, D) tensor, got {tensor.ndim}D')
+
+    stride = torch.as_tensor(stride)
+    stride = [int(s) for s in (stride.repeat(3) if stride.ndim == 0 else stride)]
+    if len(stride) != 3:
+        raise ValueError(f'stride must be a scalar or 3 values, got {len(stride)}')
+
+    kernels = [kernel] if torch.is_tensor(kernel) else list(kernel)
+    if len(kernels) == 1 and kernels[0].ndim == 3:
+        kernel_size = list(kernels[0].shape)
+    elif len(kernels) == 3 and all(k.ndim == 1 for k in kernels):
+        kernel_size = [k.numel() for k in kernels]
+    else:
+        raise ValueError('kernel must be a single 3D tensor or a sequence of three 1D tensors')
+
+    result = tensor.float().unsqueeze(0)
+    channels = tensor.shape[0]
+
+    if padding == 'same':
+        mode = 'constant' if padding_mode == 'zeros' else padding_mode
+        result = torch.nn.functional.pad(result, _compute_padding(kernel_size), mode=mode)
+    elif padding != 'valid':
+        raise ValueError(f"padding must be 'same' or 'valid', got '{padding}'")
+
+    conv = torch.nn.functional.conv3d
+    if len(kernels) == 1:
+        weight = kernels[0].to(result.dtype).view(1, 1, *kernel_size).expand(channels, 1, *kernel_size)
+        result = conv(result, weight, groups=channels, stride=stride)
+    else:
+        for dim, k in enumerate(kernels):
+            # a single-element unit kernel with no stride is an identity
+            if k.numel() == 1 and stride[dim] == 1 and float(k[0]) == 1:
+                continue
+            shape = [k.numel() if d == dim else 1 for d in range(3)]
+            weight = k.to(result.dtype).view(1, 1, *shape).expand(channels, 1, *shape)
+            dim_stride = [stride[d] if d == dim else 1 for d in range(3)]
+            result = conv(result, weight, groups=channels, stride=dim_stride)
+
+    return result.squeeze(0)
+
+
+def _dense_kernel(kernels: list) -> torch.Tensor:
+    """
+    Combine three separable 1D kernels into a dense 3D kernel via outer product.
+    """
+    return kernels[0][:, None, None] * kernels[1][None, :, None] * kernels[2][None, None, :]
+
+
+def _compute_padding(kernel_size: list) -> list:
+    """
+    Compute the per-side input padding that preserves the spatial extents of a
+    convolution ('same' padding), in the reversed order expected by `F.pad`.
+    """
+    padding = [0] * 6
+    for i, k in enumerate(reversed(kernel_size)):
+        total = int(k) - 1
+        padding[2 * i] = total // 2
+        padding[2 * i + 1] = total - total // 2
+    return padding

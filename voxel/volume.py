@@ -1212,8 +1212,10 @@ class Volume:
             resampled[out_of_bounds.unsqueeze(0)] = fill
 
         if antialias:
-            resampled = vx.filters.gaussian_blur(resampled, sigma, stride=tuple(down_factor),
-                                                 padding='valid', truncate=truncate)
+            kernels = [vx.filters.gaussian_kernel_1d(float(s), truncate, device=resampled.device)
+                       for s in sigma]
+            resampled = vx.filters._filter_tensor(resampled, kernels, stride=tuple(down_factor),
+                                                  padding='valid')
 
         # probably ideal to keep the data type consistent when using nearest neighbor sampling
         if mode == 'nearest':
@@ -1432,32 +1434,98 @@ class Volume:
     # image filtering and statistical normalization
     # -------------------------------------------------------------------------
 
-    def smooth(self, sigma: float | torch.Tensor, truncate: float = 2) -> Volume:
+    def smooth(self,
+        sigma: float | torch.Tensor,
+        space: vx.Space = 'world',
+        truncate: float = 2) -> Volume:
         """
         Apply Gaussian smoothing to the image features.
 
         Args:
-            sigma (float | Tensor): Smoothing sigma in world space units.
+            sigma (float | Tensor): Smoothing sigma.
+            space (Space, optional): The space of the sigma values, either
+                'voxel' or 'world'. Defaults to 'world'.
             truncate (float, optional): The number of standard deviations to extend
                 the kernel before truncating.
 
         Returns:
             Volume: Smoothed volume.
         """
-        scaled = torch.as_tensor(sigma, device=self.device) / self.geometry.spacing.to(self.device)
-        return self.new(vx.filters.gaussian_blur(self.tensor, scaled, truncate=truncate))
+        return vx.filters.gaussian_filter(self, sigma, space=space, truncate=truncate)
 
-    def dilate(self, iterations: int = 1) -> Volume:
+    def dilate(self, iterations: int = 1, connectivity: int = 1) -> Volume:
         """
-        Dilate the volume.
+        Apply a binary dilation to the nonzero voxels of the volume.
 
         Args:
             iterations (int, optional): Number of dilation iterations.
+            connectivity (int, optional): Neighborhood connectivity between 1 and 3.
 
         Returns:
             Volume: Dilated volume of the same data type.
         """
-        return self.new(vx.filters.dilate(self.tensor, iterations))
+        return vx.morphology.dilate(self, iterations, connectivity)
+
+    def erode(self, iterations: int = 1, connectivity: int = 1) -> Volume:
+        """
+        Apply a binary erosion to the nonzero voxels of the volume.
+
+        Args:
+            iterations (int, optional): Number of erosion iterations.
+            connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+
+        Returns:
+            Volume: Eroded volume of the same data type.
+        """
+        return vx.morphology.erode(self, iterations, connectivity)
+
+    def connected_components(self, connectivity: int = 1, largest: bool = False) -> Volume:
+        """
+        Label the connected components of the nonzero voxels, sorted by
+        descending component size (the largest component has label 1).
+        Runs on the CPU and the result is moved back to the device.
+
+        Args:
+            connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+            largest (bool, optional): If True, only the largest component is kept.
+
+        Returns:
+            Volume: Integer label map volume.
+        """
+        return vx.morphology.connected_components(self, connectivity, largest)
+
+    def flood_fill(self,
+        point: torch.Tensor,
+        space: vx.Space = 'voxel',
+        connectivity: int = 1) -> Volume:
+        """
+        Flood fill the volume from a seed point, extracting the connected
+        region of voxels that share the seed's value. Runs on the CPU and
+        the result is moved back to the device.
+
+        Args:
+            point (Tensor): A 3D seed coordinate.
+            space (Space, optional): The coordinate space of the seed point.
+            connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+
+        Returns:
+            Volume: Binary volume of the same data type marking the filled region.
+        """
+        return vx.morphology.flood_fill(self, point, space, connectivity)
+
+    def fill_holes(self, connectivity: int = 1) -> Volume:
+        """
+        Fill enclosed background cavities (holes) in the nonzero regions
+        of the volume. Runs on the CPU and the result is moved back to
+        the device.
+
+        Args:
+            connectivity (int, optional): Neighborhood connectivity between 1 and 3.
+
+        Returns:
+            Volume: Binary volume of the same data type with holes filled.
+        """
+        return vx.morphology.fill_holes(self, connectivity)
 
 
 def _cast_volume_as_tensor(other: object) -> object:
