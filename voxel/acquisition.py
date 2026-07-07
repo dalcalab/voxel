@@ -921,7 +921,8 @@ def geometries_equal(
     Check if two geometries are equal within a given tolerance.
 
     Args:
-        a, b (AcquisitionGeometry): Geometries to compare.
+        a (AcquisitionGeometry): First geometry to compare.
+        b (AcquisitionGeometry): Second geometry to compare.
         tol (float, optional): Tolerance for matrix comparison.
 
     Returns:

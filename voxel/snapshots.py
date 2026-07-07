@@ -204,8 +204,8 @@ def pca(
 
     Returns:
         Volume or list[Volume]: The projected volume(s) with `n_components`
-        channels, matching the single-vs-list structure of the input. If
-        `return_basis` is True, an `(output, basis)` tuple is returned instead.
+            channels, matching the single-vs-list structure of the input. If
+            `return_basis` is True, an `(output, basis)` tuple is returned instead.
     """
     single = isinstance(volumes, vx.Volume)
     volumes = [volumes] if single else list(volumes)

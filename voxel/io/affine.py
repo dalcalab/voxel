@@ -46,7 +46,7 @@ def save_affine(affine: vx.AffineMatrix, filename: os.PathLike, fmt: str | None 
         filename (PathLike): The path to the file to save.
         fmt (str, optional): The format of the file. If None, the format is
             determined by the file extension.
-        **kwargs: Additional arguments to pass to the file writing method.
+        **kwargs (Any): Additional arguments to pass to the file writing method.
     """
     if fmt is None:
         proto = vx.io.utility.find_protocol_by_extension(affine_io_protocols, filename)

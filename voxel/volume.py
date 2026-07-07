@@ -582,7 +582,7 @@ class Volume:
         Compute the unique elements of volume.
 
         Args:
-            **kwargs: Additional arguments passed to the underlying
+            **kwargs (Any): Additional arguments passed to the underlying
                 call to `torch.unique()`.
 
         Returns:
@@ -1596,7 +1596,8 @@ def volumes_equal(
     Check if two volumes are equal within a given tolerance.
 
     Args:
-        a, b (Volume): Volumes to compare.
+        a (Volume): First volume to compare.
+        b (Volume): Second volume to compare.
         vol_tol (float, optional): Absolute tolerance for volume tensor comparison.
         geom_tol (float, optional): Absolute tolerance for geometry comparison.
 

@@ -137,7 +137,7 @@ class Mesh:
             filename (PathLike): The path to the file to save.
             fmt (str, optional): The format of the file. If None, the format is
                 determined by the file extension.
-            **kwargs: Additional arguments passed to the file writing method.
+            **kwargs (Any): Additional arguments passed to the file writing method.
         """
         vx.save_mesh(self, filename, fmt=fmt, **kwargs)
 
