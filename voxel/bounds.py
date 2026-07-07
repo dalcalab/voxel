@@ -249,16 +249,22 @@ class BoundingBox:
             faces = faces.flip(-1)
         return vx.Mesh(self.corner_points(), faces)
 
-    def geometry(self, spacing: torch.Tensor | None = None) -> vx.AcquisitionGeometry:
+    def geometry(self,
+        spacing: float | torch.Tensor | None = None,
+        *components: float) -> vx.AcquisitionGeometry:
         """
         Construct an acquisition geometry from the bounding box.
 
         Args:
-            spacing (Tensor, optional): Desired voxel spacing of the geometry. Defaults to ones.
+            spacing (float or Tensor, optional): Desired voxel spacing of the
+                geometry. Defaults to ones.
+            *components (float): Additional components of `spacing`, allowing values to
+                be passed as separate positional arguments, e.g. `geometry(1, 1, 2)`.
 
         Returns:
             AcquisitionGeometry: Acquisition geometry.
         """
+        spacing = vx.arguments.merge_components(spacing, components)
         if spacing is None:
             spacing = torch.ones(3, device=self.device, dtype=torch.float32)
         elif not torch.is_tensor(spacing):
@@ -281,35 +287,39 @@ class BoundingBox:
 
         return vx.AcquisitionGeometry(baseshape, T)
 
-    def shift(self, delta: float | torch.Tensor) -> BoundingBox:
+    def shift(self, delta: float | torch.Tensor, *components: float) -> BoundingBox:
         """
         Translate the bounding box center.
 
         Args:
             delta (float or Tensor): Translation delta, as a scalar or (3,) tensor,
                 applied in the ambient coordinate frame.
+            *components (float): Additional components of `delta`, allowing values to
+                be passed as separate positional arguments, e.g. `shift(1, 0, 0)`.
 
         Returns:
             BoundingBox: Shifted bounding box.
         """
-        delta = self._conform_units(delta)
+        delta = self._conform_units(vx.arguments.merge_components(delta, components))
         return BoundingBox(self._center + delta, self._rotation, self._extent)
 
-    def scale(self, factor: float | torch.Tensor) -> BoundingBox:
+    def scale(self, factor: float | torch.Tensor, *components: float) -> BoundingBox:
         """
         Scale the bounding box extent about its center.
 
         Args:
             factor (float or Tensor): Scaling factor, as a scalar or (3,) tensor
                 of per-axis factors in the box frame.
+            *components (float): Additional components of `factor`, allowing values to
+                be passed as separate positional arguments, e.g. `scale(1, 1, 2)`.
 
         Returns:
             BoundingBox: Scaled bounding box.
         """
-        factor = self._conform_units(factor)
+        factor = self._conform_units(vx.arguments.merge_components(factor, components))
         return BoundingBox(self._center, self._rotation, self._extent * factor)
 
-    def pad(self, margin: float | torch.Tensor) -> BoundingBox:
+    def pad(self, margin: float | torch.Tensor, *components: float) -> BoundingBox:
         """
         Pad (or shrink) the bounding box sides by a margin.
 
@@ -317,17 +327,19 @@ class BoundingBox:
             margin (float or Tensor): Margin delta for each side of the box, in box-frame
                 units. Can be a scalar, a (3,) tensor of per-axis margins, or a (3, 2)
                 tensor of per-side (lower, upper) margins. Negative values shrink the box.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `pad(1, 2, 3)`.
 
         Returns:
             BoundingBox: Padded bounding box.
         """
-        margin = self._conform_units(margin, 2)
+        margin = self._conform_units(vx.arguments.merge_components(margin, components), 2)
         lower, upper = margin[:, 0], margin[:, 1]
         extent = self._extent + (lower + upper) / 2
         center = self._center + self._rotation @ ((upper - lower) / 2)
         return BoundingBox(center, self._rotation, extent)
 
-    def trim(self, margin: float | torch.Tensor) -> BoundingBox:
+    def trim(self, margin: float | torch.Tensor, *components: float) -> BoundingBox:
         """
         Trim the bounding box sides by a margin. This is the inverse of `pad`.
 
@@ -335,25 +347,34 @@ class BoundingBox:
             margin (float or Tensor): Margin delta for each side of the box, in box-frame
                 units. Can be a scalar, a (3,) tensor of per-axis margins, or a (3, 2)
                 tensor of per-side (lower, upper) margins.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `trim(1, 2, 3)`.
 
         Returns:
             BoundingBox: Trimmed bounding box.
         """
+        margin = vx.arguments.merge_components(margin, components)
         return self.pad(-self._conform_units(margin, 2))
 
-    def rotate(self, rotation: torch.Tensor, degrees: bool = True) -> BoundingBox:
+    def rotate(self,
+        rotation: torch.Tensor,
+        *components: float,
+        degrees: bool = True) -> BoundingBox:
         """
         Applies a rotation to the bounding box.
 
         Args:
             rotation (Tensor): Rotation angles. If `degrees` is True, the
                 angles are in degrees, otherwise they are in radians.
+            *components (float): Additional components of `rotation`, allowing angles to
+                be passed as separate positional arguments, e.g. `rotate(0, 0, 45)`.
             degrees (bool, optional): Whether the angles are defined as degrees or,
                 alternatively, as radians.
 
         Returns:
             BoundingBox: Rotated bounding box.
         """
+        rotation = vx.arguments.merge_components(rotation, components)
         matrix = vx.affine.angles_to_rotation_matrix(rotation, degrees)[:3, :3]
         rotated = matrix @ self.rotation
         return BoundingBox(self.center, rotated, self.extent)

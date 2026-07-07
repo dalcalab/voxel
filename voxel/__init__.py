@@ -8,6 +8,8 @@ from . import morphology
 from . import space
 from .space import Space
 
+from . import arguments
+
 from . import affine
 from .affine import AffineMatrix
 from .affine import AffineVolumeTransform

@@ -36,7 +36,8 @@ def gaussian_kernel_1d(
 def gaussian_filter(
     volume: vx.Volume,
     sigma: float | torch.Tensor,
-    space: vx.Space,
+    *components: float,
+    space: vx.Space = None,
     truncate: float = 2.0,
     stride: int | torch.Tensor = 1,
     separable: bool = True,
@@ -46,7 +47,10 @@ def gaussian_filter(
 
     Args:
         sigma (float or Tensor): Standard deviation(s) of size $(1,)$ or $(3,)$.
+        *components (float): Additional components of `sigma`, allowing values to
+            be passed as separate positional arguments, e.g. `gaussian_filter(vol, 1, 1, 2, 'voxel')`.
         space (Space): The space of the sigma values, either 'voxel' or 'world'.
+            Can be provided as the last positional argument.
         truncate (float, optional): The number of standard deviations to extend
             the kernel before truncating.
         stride (int or Tensor, optional): Downsampling stride(s) in voxel units.
@@ -57,6 +61,8 @@ def gaussian_filter(
     Returns:
         Volume: Smoothed floating-point volume.
     """
+    components, space = vx.arguments.extract_space(components, space)
+    sigma = vx.arguments.merge_components(sigma, components)
     sigma = volume.geometry.conform_units(sigma, space, 'voxel')
     kernels = [gaussian_kernel_1d(float(s), truncate, volume.device) if volume.baseshape[i] > 1
                else torch.ones(1, device=volume.device) for i, s in enumerate(sigma)]
@@ -68,7 +74,8 @@ def gaussian_filter(
 def box_filter(
     volume: vx.Volume,
     size: float | torch.Tensor,
-    space: vx.Space,
+    *components: float,
+    space: vx.Space = None,
     stride: int | torch.Tensor = 1,
     separable: bool = True,
     padding_mode: str = 'replicate') -> vx.Volume:
@@ -80,7 +87,10 @@ def box_filter(
 
     Args:
         size (float or Tensor): Box extent(s) of size $(1,)$ or $(3,)$.
+        *components (float): Additional components of `size`, allowing values to
+            be passed as separate positional arguments, e.g. `box_filter(vol, 3, 3, 1, 'voxel')`.
         space (Space): The space of the size values, either 'voxel' or 'world'.
+            Can be provided as the last positional argument.
         stride (int or Tensor, optional): Downsampling stride(s) in voxel units.
         separable (bool, optional): Whether to filter with three separable 1D
             kernels or a single dense 3D kernel. The results are equivalent.
@@ -89,6 +99,8 @@ def box_filter(
     Returns:
         Volume: Filtered floating-point volume.
     """
+    components, space = vx.arguments.extract_space(components, space)
+    size = vx.arguments.merge_components(size, components)
     size = volume.geometry.conform_units(size, space, 'voxel')
     kernel_size = (torch.round((size - 1) / 2) * 2 + 1).int().clamp(min=1)
 

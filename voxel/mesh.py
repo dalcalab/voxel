@@ -362,17 +362,22 @@ class Mesh:
         """
         return Mesh(transform.transform(self.vertices), self.faces)
 
-    def bounds(self, margin: float | torch.Tensor | None = None) -> vx.BoundingBox:
+    def bounds(self,
+        margin: float | torch.Tensor | None = None,
+        *components: float) -> vx.BoundingBox:
         """
         Compute the axis-aligned bounding box enclosing the mesh vertices.
 
         Args:
             margin (float or Tensor, optional): Margin (in vertex units) to expand
                 the bounds. Can be a positive or negative delta.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `bounds(1, 2, 3)`.
 
         Returns:
             BoundingBox: Bounding box enclosing the vertices.
         """
+        margin = vx.arguments.merge_components(margin, components)
         box = vx.BoundingBox.from_points(self.vertices.detach())
         return box if margin is None else box.pad(margin)
 

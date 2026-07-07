@@ -267,17 +267,25 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         return vx.slicing.conform_coordinates(units, num)
 
-    def shift(self, delta: torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
+    def shift(self,
+        delta: float | torch.Tensor,
+        *components: float,
+        space: vx.Space = None) -> AcquisitionGeometry:
         """
         Shift, or translate, the acquisition geometry.
 
         Args:
             delta (Tensor): The translation vector of length 3.
-            space (Space): The space in which to apply the shift.
+            *components (float): Additional components of `delta`, allowing values to
+                be passed as separate positional arguments, e.g. `shift(1, 0, 0, 'voxel')`.
+            space (Space): The space in which to apply the shift. Can be provided
+                as the last positional argument.
 
         Returns:
             AcquisitionGeometry: The shifted geometry.
         """
+        components, space = vx.arguments.extract_space(components, space)
+        delta = vx.arguments.merge_components(delta, components)
         trf = vx.affine.translation_matrix(torch.as_tensor(delta, device=self.device))
         matrix = trf @ self if vx.Space(space) =='world' else self @ trf
         return self._from_new_properties(matrix=matrix)
@@ -298,17 +306,25 @@ class AcquisitionGeometry(vx.AffineMatrix):
         current = self.center if center else self.origin
         return self.shift(target - current, space='world')
 
-    def scale(self, factor: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
+    def scale(self,
+        factor: float | torch.Tensor,
+        *components: float,
+        space: vx.Space = None) -> AcquisitionGeometry:
         """
         Scale the acquisition geometry.
 
         Args:
             factor (float or torch.Tensor): The scaling factor.
-            space (Space): The space in which to apply the scale.
+            *components (float): Additional components of `factor`, allowing values to
+                be passed as separate positional arguments, e.g. `scale(1, 1, 2, 'voxel')`.
+            space (Space): The space in which to apply the scale. Can be provided
+                as the last positional argument.
 
         Returns:
             AcquisitionGeometry: The scaled geometry.
         """
+        components, space = vx.arguments.extract_space(components, space)
+        factor = vx.arguments.merge_components(factor, components)
         diag = torch.ones(4, device=self.device)
         diag[:3] = torch.as_tensor(factor, device=self.device)
         trf = torch.diag(diag)
@@ -317,7 +333,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def rotate(self,
         rotation: torch.Tensor,
-        space: vx.Space,
+        *components: float,
+        space: vx.Space = None,
         corner: bool = False,
         degrees: bool = True) -> AcquisitionGeometry:
         """
@@ -326,7 +343,10 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Args:
             rotation (Tensor): Rotation angles (x, y, z). If `degrees` is True, the
                 angles are in degrees, otherwise they are in radians.
-            space (Space): The space in which to apply the rotation.
+            *components (float): Additional components of `rotation`, allowing angles to
+                be passed as separate positional arguments, e.g. `rotate(0, 0, 45, 'world')`.
+            space (Space): The space in which to apply the rotation. Can be provided
+                as the last positional argument.
             corner (bool, optional): Whether to rotate around the image corner or center. Only
                 applicable when the space is 'voxel'. Defaults to True.
             degrees (bool, optional): Whether the angles are defined as degrees or,
@@ -335,6 +355,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Returns:
             AcquisitionGeometry: The rotated geometry.
         """
+        components, space = vx.arguments.extract_space(components, space)
+        rotation = vx.arguments.merge_components(rotation, components)
         rotation = torch.as_tensor(rotation, device=self.device)
         trf = vx.affine.angles_to_rotation_matrix(rotation, degrees=degrees)
 
@@ -352,20 +374,26 @@ class AcquisitionGeometry(vx.AffineMatrix):
     def shear(
         self,
         shear: torch.Tensor,
-        space: vx.Space,
+        *components: float,
+        space: vx.Space = None,
         corner: bool = False) -> AcquisitionGeometry:
         """
         Shear (skew) the acquisition geometry.
 
         Args:
             shear (Tensor): Shear factors of shape (3, 2).
-            space (Space): The space in which to apply the shear.
+            *components (float): Additional components of `shear`, allowing the six
+                flattened factors to be passed as separate positional arguments.
+            space (Space): The space in which to apply the shear. Can be provided
+                as the last positional argument.
             corner (bool, optional): Whether to shear around the image corner or center.
                 Only applicable when the space is 'voxel'. Defaults to False.
 
         Returns:
             AcquisitionGeometry: The sheared geometry.
         """
+        components, space = vx.arguments.extract_space(components, space)
+        shear = vx.arguments.merge_components(shear, components)
         shear = torch.as_tensor(shear, device=self.device)
         if shear.numel() != 6:
             raise ValueError('shear must have shape (3, 2) or contain 6 shear factors')
@@ -425,6 +453,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def resample(self,
         spacing: float | torch.Tensor = None,
+        *components: float,
         in_plane_spacing: float | torch.Tensor = None,
         slice_spacing: float | torch.Tensor = None) -> AcquisitionGeometry:
         """
@@ -433,6 +462,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Args:
             spacing (float | Tensor): Target voxel spacing. An isotropic target
                 is assumed if a scalar is provided.
+            *components (float): Additional components of `spacing`, allowing values to
+                be passed as separate positional arguments, e.g. `resample(1, 1, 2)`.
             in_plane_spacing (float | Tensor): Target in-plane voxel spacing. Mutually
                 exclusive with the `spacing` argument.
             slice_spacing (float | Tensor): Target slice spacing. Mutually exclusive
@@ -441,6 +472,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Returns:
             AcquisitionGeometry: Resampled geometry.
         """
+        spacing = vx.arguments.merge_components(spacing, components)
         if spacing is None and in_plane_spacing is None and slice_spacing is None:
             raise ValueError('must set target spacing, in_plane_spacing, or slice_spacing')
         if spacing is not None:
@@ -480,7 +512,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
     def pool(self,
         scale: int = 2,
-        space: vx.Space = 'voxel',
+        *components: int,
+        space: vx.Space = None,
         spacing_ratio_thresh: float | None = None) -> AcquisitionGeometry:
         """
         Pool the geometry with a sliding window.
@@ -502,13 +535,18 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         Args:
             scale (int, optional): The size of the pooling window. Defaults to 2.
-            space (Space, optional): Space of the scale value. Defaults to 'voxel'.
+            *components (int): Additional components of `scale`, allowing values to
+                be passed as separate positional arguments, e.g. `pool(2, 2, 1)`.
+            space (Space, optional): Space of the scale value. Can be provided as
+                the last positional argument. Defaults to 'voxel'.
             spacing_ratio_thresh (float, optional): Slice spacing ratio that determines
                 whether the slice dimension is pooled. This is disabled by default.
 
         Returns:
             AcquisitionGeometry: Pooled geometry.
         """
+        components, space = vx.arguments.extract_space(components, space, default='voxel')
+        scale = vx.arguments.merge_components(scale, components)
         scale = self.conform_units(scale, space, 'voxel').round().int().clamp(min=1)
 
         factors = [min(d, int(s.item())) for s, d in zip(scale, self.baseshape)]
@@ -539,7 +577,10 @@ class AcquisitionGeometry(vx.AffineMatrix):
 
         return pooled
 
-    def reshape(self, baseshape: torch.Size, from_origin: bool = False) -> AcquisitionGeometry:
+    def reshape(self,
+        baseshape: int | torch.Size,
+        *components: int,
+        from_origin: bool = False) -> AcquisitionGeometry:
         """
         Modify the spatial extent of the volume geometry, cropping or padding around the
         center image to fit a given **baseshape**.
@@ -548,13 +589,19 @@ class AcquisitionGeometry(vx.AffineMatrix):
         will always yield the original geometry.
 
         Args:
-            baseshape (Size): Target spatial (3D) shape.
+            baseshape (int | Size): Target spatial (3D) shape. An isotropic shape
+                is assumed if a scalar is provided.
+            *components (int): Additional components of `baseshape`, allowing values to
+                be passed as separate positional arguments, e.g. `reshape(64, 64, 64)`.
             from_origin (bool, optional): If True, padding or cropping will be done
                 at the ends of the image shape and not centered.
 
         Returns:
             AcquisitionGeometry: Reshaped geometry.
         """
+        baseshape = vx.arguments.merge_components(baseshape, components)
+        if isinstance(baseshape, int):
+            baseshape = (baseshape,) * 3
         baseshape = torch.Size(baseshape)
         if baseshape == self.baseshape:
             return self
@@ -565,7 +612,10 @@ class AcquisitionGeometry(vx.AffineMatrix):
         shift = (torch.tensor(self.baseshape) - torch.tensor(baseshape)) // 2
         return self.shift(shift, space='voxel').reshape(baseshape, from_origin=True)
 
-    def pad(self, margin: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
+    def pad(self,
+        margin: float | torch.Tensor,
+        *components: float,
+        space: vx.Space = None) -> AcquisitionGeometry:
         """
         Pad the spatial extent of the volume geometry by a given margin. Note that
         a negative margin value will result in trimming (cropping).
@@ -574,16 +624,24 @@ class AcquisitionGeometry(vx.AffineMatrix):
             margin (float or Tensor): Delta of specified units to pad (or crop)
                 the volume by in each direction. Can be of size $(1,)$, $(3,)$,
                 or $(3, 2)$.
-            space (Space): The space of the margin, either 'voxel' or 'world'.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `pad(1, 2, 3, 'voxel')`.
+            space (Space): The space of the margin, either 'voxel' or 'world'. Can be
+                provided as the last positional argument.
 
         Returns:
             AcquisitionGeometry: Reshaped volume geometry.
         """
+        components, space = vx.arguments.extract_space(components, space)
+        margin = vx.arguments.merge_components(margin, components)
         margin = self.conform_units(margin, space, 'voxel', 2).cpu().round().int()
         new_shape = torch.tensor(self.baseshape) + margin.sum(-1)
         return self.shift(-margin[:, 0], space='voxel').reshape(new_shape, from_origin=True)
 
-    def trim(self, margin: float | torch.Tensor, space: vx.Space) -> AcquisitionGeometry:
+    def trim(self,
+        margin: float | torch.Tensor,
+        *components: float,
+        space: vx.Space = None) -> AcquisitionGeometry:
         """
         Trim the spatial extent of the volume geometry by a given margin. This is
         equivalent to padding with negative margin values.
@@ -591,16 +649,22 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Args:
             margin (float or Tensor): Delta of specified units to trim the volume
                 by in each direction. Can be of size $(1,)$, $(3,)$, or $(3, 2)$.
-            space (Space): The space of the margin, either 'voxel' or 'world'.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `trim(1, 2, 3, 'voxel')`.
+            space (Space): The space of the margin, either 'voxel' or 'world'. Can be
+                provided as the last positional argument.
 
         Returns:
             AcquisitionGeometry: Reshaped volume geometry.
         """
-        return self.pad(-torch.as_tensor(margin), space)
+        components, space = vx.arguments.extract_space(components, space)
+        margin = vx.arguments.merge_components(margin, components)
+        return self.pad(-torch.as_tensor(margin), space=space)
 
     def bounds(self,
         margin: float | torch.Tensor = None,
-        space: vx.Space = 'world') -> vx.BoundingBox:
+        *components: float,
+        space: vx.Space = None) -> vx.BoundingBox:
         """
         Compute a world-space bounding box enclosing the grid. The box covers
         the full extent of the voxels, i.e. it is padded 0.5 voxels beyond the
@@ -609,11 +673,16 @@ class AcquisitionGeometry(vx.AffineMatrix):
         Args:
             margin (float or Tensor, optional): Margin to expand the bounds.
                 Can be a positive or negative delta.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `bounds(1, 2, 3)`.
             space (Space, optional): Space of the margin values, either 'voxel' or 'world'.
+                Can be provided as the last positional argument. Defaults to 'world'.
 
         Returns:
             BoundingBox: Bounding box in world-space coordinates.
         """
+        components, space = vx.arguments.extract_space(components, space, default='world')
+        margin = vx.arguments.merge_components(margin, components)
         shape = torch.tensor(self.baseshape, device=self.device).float()
         box = vx.BoundingBox.from_min_max(torch.full_like(shape, -0.5), shape - 0.5)
 

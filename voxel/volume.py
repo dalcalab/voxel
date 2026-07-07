@@ -1056,7 +1056,9 @@ class Volume:
         geometry = geometry.reshape(cropped_tensor.shape[-3:], from_origin=True)
         return self.new(cropped_tensor, geometry)
 
-    def crop_to_nonzero(self, margin: float | torch.Tensor | None = None) -> Volume:
+    def crop_to_nonzero(self,
+        margin: float | torch.Tensor | None = None,
+        *components: float) -> Volume:
         """
         Crop the volume to the bounding box around nonzero voxels.
 
@@ -1064,10 +1066,13 @@ class Volume:
             margin (float or Tensor, optional): Margin (in world units) to expand
                 the cropping boundary. Can be a positive or negative delta. The
                 boundary will be clipped if it extends beyond the shape of the volume.
+            *components (float): Additional components of `margin`, allowing values to
+                be passed as separate positional arguments, e.g. `crop_to_nonzero(1, 1, 2)`.
 
         Returns:
             Volume: The cropped volume instance.
         """
+        margin = vx.arguments.merge_components(margin, components)
         # note: we're using the voxel-space range directly here instead of calling
         # self.bounds() to avoid the unnecessary transformation into world space
         # then back again
@@ -1230,6 +1235,7 @@ class Volume:
 
     def resample(self,
         spacing: float | torch.Tensor = None,
+        *components: float,
         in_plane_spacing: float | torch.Tensor = None,
         slice_spacing: float | torch.Tensor = None,
         mode: str = 'linear',
@@ -1241,6 +1247,8 @@ class Volume:
         Args:
             spacing (float |Tensor): Target voxel spacing. An isotropic target
                 is assumed if a scalar is provided.
+            *components (float): Additional components of `spacing`, allowing values to
+                be passed as separate positional arguments, e.g. `resample(1, 1, 2)`.
             in_plane_spacing (float | Tensor): Target in-plane voxel spacing. Mutually
                 exclusive with the `spacing` argument.
             slice_spacing (float | Tensor): Target slice spacing. Mutually exclusive
@@ -1253,11 +1261,12 @@ class Volume:
         Returns:
             Volume: Volume resampled to the target voxel spacing.
         """
+        spacing = vx.arguments.merge_components(spacing, components)
         target = self.geometry.resample(spacing=spacing, in_plane_spacing=in_plane_spacing,
                                         slice_spacing=slice_spacing)
         return self.resample_like(target, mode=mode, padding_mode=padding_mode, antialias=antialias)
 
-    def reshape(self, baseshape: torch.Size) -> Volume:
+    def reshape(self, baseshape: int | torch.Size, *components: int) -> Volume:
         """
         Modify the spatial extent of the volume, cropping or padding around the
         center image to fit a given **baseshape**.
@@ -1266,14 +1275,20 @@ class Volume:
         will always yield the original geometry.
 
         Args:
-            baseshape (Size): Target spatial (3D) shape.
+            baseshape (int | Size): Target spatial (3D) shape. An isotropic shape
+                is assumed if a scalar is provided.
+            *components (int): Additional components of `baseshape`, allowing values to
+                be passed as separate positional arguments, e.g. `reshape(64, 64, 64)`.
 
         Returns:
             Volume: Reshaped volume instance.
         """
-        return self.resample_like(self.geometry.reshape(baseshape), mode='nearest')
+        return self.resample_like(self.geometry.reshape(baseshape, *components), mode='nearest')
 
-    def pad(self, delta: float | torch.Tensor, space: vx.Space) -> Volume:
+    def pad(self,
+        delta: float | torch.Tensor,
+        *components: float,
+        space: vx.Space = None) -> Volume:
         """
         Pad the spatial extent of the volume by a given delta. Note that
         a negative delta value will result in trimming (cropping).
@@ -1282,15 +1297,22 @@ class Volume:
             delta (float or Tensor): Delta of specified units to pad (or crop)
                 the volume by in each direction. Can be of size $(1,)$, $(3,)$,
                 or $(3, 2)$.
+            *components (float): Additional components of `delta`, allowing values to
+                be passed as separate positional arguments, e.g. `pad(1, 2, 3, 'voxel')`.
             space (Space): The coordinate space of the delta values, either
-                'voxel' or 'world'.
+                'voxel' or 'world'. Can be provided as the last positional argument.
 
         Returns:
             Volume: Padded volume instance.
         """
-        return self.resample_like(self.geometry.pad(delta, space), mode='nearest')
+        components, space = vx.arguments.extract_space(components, space)
+        delta = vx.arguments.merge_components(delta, components)
+        return self.resample_like(self.geometry.pad(delta, space=space), mode='nearest')
 
-    def trim(self, delta: float | torch.Tensor, space: vx.Space) -> Volume:
+    def trim(self,
+        delta: float | torch.Tensor,
+        *components: float,
+        space: vx.Space = None) -> Volume:
         """
         Trim the spatial extent of the volume by a given delta. This is
         equivalent to padding with negative delta values.
@@ -1298,13 +1320,17 @@ class Volume:
         Args:
             delta (float or Tensor): Delta of specified units to trim the volume
                 by in each direction. Can be of size $(1,)$, $(3,)$, or $(3, 2)$.
+            *components (float): Additional components of `delta`, allowing values to
+                be passed as separate positional arguments, e.g. `trim(1, 2, 3, 'voxel')`.
             space (Space): The coordinate space of the delta values, either
-                'voxel' or 'world'.
+                'voxel' or 'world'. Can be provided as the last positional argument.
 
         Returns:
             Volume: Trimmed volume instance.
         """
-        return self.pad(-delta, space)
+        components, space = vx.arguments.extract_space(components, space)
+        delta = torch.as_tensor(vx.arguments.merge_components(delta, components))
+        return self.pad(-delta, space=space)
 
     def transform(self,
         transform: vx.AffineVolumeTransform | vx.AffineMatrix,
@@ -1365,8 +1391,9 @@ class Volume:
 
     def pool(self,
         scale: int = 2,
+        *components: int,
         mode: str = 'mean',
-        space: vx.Space = 'voxel',
+        space: vx.Space = None,
         spacing_ratio_thresh: float | None = None) -> Volume:
         """
         Pool the voxel data with a sliding window.
@@ -1388,14 +1415,19 @@ class Volume:
 
         Args:
             scale (int, optional): The size of the pooling window. Defaults to 2.
+            *components (int): Additional components of `scale`, allowing values to
+                be passed as separate positional arguments, e.g. `pool(2, 2, 1)`.
             mode (str, optional): Pooling mode - can be 'mean' or 'max'. Defaults to 'mean'.
-            space (Space, optional): Space of the scale value. Defaults to 'voxel'.
+            space (Space, optional): Space of the scale value. Can be provided as
+                the last positional argument. Defaults to 'voxel'.
             spacing_ratio_thresh (float, optional): Slice spacing ratio that determines
                 whether the slice dimension is pooled. This is disabled by default.
 
         Returns:
             Volume: Pooled volume.
         """
+        components, space = vx.arguments.extract_space(components, space, default='voxel')
+        scale = vx.arguments.merge_components(scale, components)
         scale = self.geometry.conform_units(scale, space, 'voxel').round().int().clamp(min=1)
 
         factors = [min(d, int(s.item())) for s, d in zip(scale, self.baseshape)]
@@ -1441,21 +1473,27 @@ class Volume:
 
     def smooth(self,
         sigma: float | torch.Tensor,
-        space: vx.Space = 'world',
+        *components: float,
+        space: vx.Space = None,
         truncate: float = 2) -> Volume:
         """
         Apply Gaussian smoothing to the image features.
 
         Args:
             sigma (float | Tensor): Smoothing sigma.
+            *components (float): Additional components of `sigma`, allowing values to
+                be passed as separate positional arguments, e.g. `smooth(1, 1, 2)`.
             space (Space, optional): The space of the sigma values, either
-                'voxel' or 'world'. Defaults to 'world'.
+                'voxel' or 'world'. Can be provided as the last positional
+                argument. Defaults to 'world'.
             truncate (float, optional): The number of standard deviations to extend
                 the kernel before truncating.
 
         Returns:
             Volume: Smoothed volume.
         """
+        components, space = vx.arguments.extract_space(components, space, default='world')
+        sigma = vx.arguments.merge_components(sigma, components)
         return vx.filters.gaussian_filter(self, sigma, space=space, truncate=truncate)
 
     def dilate(self,
