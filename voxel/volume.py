@@ -20,14 +20,17 @@ class Volume:
 
     def __init__(self,
         tensor: torch.Tensor,
-        geometry: vx.AcquisitionGeometry | vx.AffineMatrix | None = None) -> None:
+        geometry: vx.AcquisitionGeometry | vx.AffineMatrix | None = None,
+        labels: vx.LabelLookup | None = None) -> None:
         """
         Args:
-            tensor (Tensor): Image data tensor of shape $(C, W, H, D)$ or $(W, H, D)$. 
+            tensor (Tensor): Image data tensor of shape $(C, W, H, D)$ or $(W, H, D)$.
             geometry (AcquisitionGeometry or AffineMatrix, optional): Affine geometry
                 or matrix representing the voxel-to-world coordinate transform. If
                 None, it defaults to a shifted identity in which the image volume
                 is centered at the world origin.
+            labels (LabelLookup, optional): A lookup table annotating the integer
+                values of a label-mapped volume with names and colors.
         """
         if tensor.ndim == 3:
             tensor = tensor.unsqueeze(0)
@@ -35,6 +38,7 @@ class Volume:
             raise ValueError(f'expected 3D or 4D features, got a {tensor.ndim}D input')
         self._tensor = tensor
         self.geometry = geometry
+        self.labels = labels
 
     # -------------------------------------------------------------------------
     # property getters and setters and core methods
@@ -63,6 +67,20 @@ class Volume:
             raise ValueError(f'acquisition geometry shape {tuple(geometry.baseshape)} must '
                              f'match the image base shape {tuple(self.baseshape)}')
         self._geometry = geometry
+
+    @property
+    def labels(self) -> vx.LabelLookup | None:
+        """
+        The label lookup table annotating the integer values of this volume,
+        or None if the volume has no associated labels.
+        """
+        return self._labels
+
+    @labels.setter
+    def labels(self, labels: vx.LabelLookup | None):
+        if labels is not None and not isinstance(labels, vx.LabelLookup):
+            raise TypeError(f'volume labels must be a LabelLookup or None, got {type(labels).__name__}')
+        self._labels = labels
 
     @property
     def shape(self) -> torch.Size:
@@ -101,7 +119,8 @@ class Volume:
 
     def new(self,
         tensor: torch.Tensor,
-        geometry: vx.AcquisitionGeometry | None = None) -> Volume:
+        geometry: vx.AcquisitionGeometry | None = None,
+        keep_labels: bool = True) -> Volume:
         """
         Construct a new volume instance with the provided features tensor, while
         preserving any unchanged properties of the original volume.
@@ -110,9 +129,13 @@ class Volume:
             tensor (Tensor): The new image tensor replacement.
             geometry (AcquisitionGeometry, optional): The new geometry. If None,
                 the current geometry will be propagated.
+            keep_labels (bool, optional): Whether to propagate the current label
+                lookup table to the new volume. Should be False for operations
+                that no longer produce an integer label map.
         """
         geometry = self.geometry if geometry is None else geometry
-        return self.__class__(tensor, geometry)
+        labels = self.labels if keep_labels else None
+        return self.__class__(tensor, geometry, labels)
 
     def copy(self) -> Volume:
         """
@@ -626,7 +649,7 @@ class Volume:
             Tensor or Volume: Softmaxed probabilities.
         """
         reduced = self.tensor.softmax(dim=dim)
-        return self.new(reduced) if dim == 0 else reduced
+        return self.new(reduced, keep_labels=False) if dim == 0 else reduced
 
     def argmax(self, dim: int | None = None) -> Volume | torch.Tensor:
         """
@@ -644,22 +667,90 @@ class Volume:
         reduced = self.tensor.argmax(dim=dim)
         return self.new(reduced) if dim == 0 else reduced
 
-    def onehot(self, num_classes: int = -1) -> vx.Volume:
+    def recode(self,
+        mapping: vx.LabelLookup | torch.Tensor | list,
+        reverse: bool = False,
+        background: bool = False) -> vx.Volume:
         """
-        One hot encode a label volume.
+        Remap the integer label values of the volume via a lookup.
+
+        In the forward direction, the volume is treated as an index map and each
+        voxel value `i` is replaced with `mapping[i]`. In the reverse direction,
+        each voxel value is replaced with its position in `mapping` (the inverse
+        operation).
+
+        A `LabelLookup` is treated as its ordered integer `indices`. When the
+        forward direction is used with a `LabelLookup`, the recoded voxel values
+        are the real label values it describes, so the lookup is attached to the
+        returned volume as its `labels`.
 
         Args:
-            num_classes (int, optional): Total number of classes. If set to -1, the
-                number of classes will be inferred as one greater than the largest
-                class value in the input volume.
+            mapping (LabelLookup or Tensor or list): The ordered values to map
+                index positions to.
+            reverse (bool, optional): Map values back to their index positions.
+            background (bool, optional): Prepend the background label 0 to
+                `mapping` (unless already present) so it occupies the first index.
 
         Returns:
-            Volume: The one-hot encoded volume, with one channel per class.
+            Volume: A new label-map volume with remapped values.
+        """
+        assert self.num_channels == 1, f'cannot recode volume with {self.num_channels} channels'
+        assert not torch.is_floating_point(self.tensor), f'recode requires volume of type int, got {self.dtype}'
+        recoded = vx.labels.recode(self.tensor, mapping, reverse=reverse, background=background)
+        volume = self.new(recoded, keep_labels=False)
+        if not reverse and isinstance(mapping, vx.LabelLookup):
+            volume.labels = mapping
+        return volume
+
+    def onehot(self,
+        labels: int | torch.Tensor | vx.LabelLookup = -1,
+        background: bool = False) -> vx.Volume:
+        """
+        One hot encode a label volume, with one channel per class.
+
+        Args:
+            labels (int or Tensor or LabelLookup, optional): The classes to encode.
+                If an integer, it is the total number of classes (with -1 inferring
+                one greater than the largest voxel value). If a tensor or lookup of
+                label values, the volume is first recoded so those values map to the
+                one-hot channels, in order.
+            background (bool, optional): When `labels` is a tensor or lookup, reserve
+                the first channel for the background label 0 (unless already present).
+
+        Returns:
+            Volume: The one-hot encoded volume.
         """
         assert self.num_channels == 1, f'cannot one hot volume with {self.num_channels} channels'
         assert not torch.is_floating_point(self.tensor), f'one hot requires volume of type int, got {self.dtype}'
-        tensor = torch.nn.functional.one_hot(self.tensor.squeeze(0).long(), num_classes=num_classes)
-        return self.new(tensor.movedim(-1, 0))
+        tensor = vx.labels.onehot(self.tensor.squeeze(0), labels=labels, background=background)
+        return self.new(tensor, keep_labels=False)
+
+    def collapse(self,
+        labels: torch.Tensor | vx.LabelLookup = None,
+        background: bool = False) -> vx.Volume:
+        """
+        Collapse a multi-channel (one-hot or probabilistic) volume into a single
+        channel label map. This is the inverse of `onehot`.
+
+        The channel axis is reduced with an argmax, and the resulting per-voxel
+        channel index is optionally recoded into label values.
+
+        Args:
+            labels (Tensor or LabelLookup, optional): The label values that the
+                channels correspond to. If None, the channel indices are returned
+                directly. If a tensor or lookup, the channel index is recoded into
+                the corresponding label value.
+            background (bool, optional): When `labels` is provided, treat the first
+                channel as the background label 0 (unless already present).
+
+        Returns:
+            Volume: A single-channel label map volume.
+        """
+        reduced = vx.labels.collapse(self.tensor, labels=labels, background=background)
+        volume = self.new(reduced, keep_labels=False)
+        if isinstance(labels, vx.LabelLookup):
+            volume.labels = labels
+        return volume
 
     # -------------------------------------------------------------------------
     # indexing / operator overloads for tensor-style voxel data manipulation
@@ -704,22 +795,22 @@ class Volume:
     # comparison operators
 
     def __eq__(self, other) -> Volume:
-        return self.new(self.tensor == _cast_volume_as_tensor(other))
-    
+        return self.new(self.tensor == _cast_volume_as_tensor(other), keep_labels=False)
+
     def __ne__(self, other) -> Volume:
-        return self.new(self.tensor != _cast_volume_as_tensor(other))
+        return self.new(self.tensor != _cast_volume_as_tensor(other), keep_labels=False)
 
     def __lt__(self, other) -> Volume:
-        return self.new(self.tensor < _cast_volume_as_tensor(other))
+        return self.new(self.tensor < _cast_volume_as_tensor(other), keep_labels=False)
 
     def __le__(self, other) -> Volume:
-        return self.new(self.tensor <= _cast_volume_as_tensor(other))
+        return self.new(self.tensor <= _cast_volume_as_tensor(other), keep_labels=False)
 
     def __gt__(self, other) -> Volume:
-        return self.new(self.tensor > _cast_volume_as_tensor(other))
+        return self.new(self.tensor > _cast_volume_as_tensor(other), keep_labels=False)
 
     def __ge__(self, other) -> Volume:
-        return self.new(self.tensor >= _cast_volume_as_tensor(other))
+        return self.new(self.tensor >= _cast_volume_as_tensor(other), keep_labels=False)
 
     # unary operators
 

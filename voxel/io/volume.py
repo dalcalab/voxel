@@ -5,6 +5,7 @@ Reading and writing image volumes to various file formats.
 from __future__ import annotations
 
 import os
+import json
 import torch
 import numpy as np
 import voxel as vx
@@ -97,6 +98,53 @@ class NiftiArrayIO(IOProtocol):
             raise ImportError('the `nibabel` python package must be installed for nifti volume IO')
         self.nib = nib
 
+    def _color_to_hex(self, color: torch.Tensor) -> str:
+        r, g, b = (color * 255).round().to(torch.int).tolist()
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    def _color_from_hex(self, text: str) -> torch.Tensor:
+        text = text.strip().lstrip('#')
+        rgb = [int(text[i:i + 2], 16) for i in (0, 2, 4)]
+        return torch.tensor(rgb, dtype=torch.float32) / 255.0
+
+    def _labels_to_json(self, lookup: vx.LabelLookup) -> str:
+        """
+        Serialize a label lookup table into a JSON string. Colors are stored as
+        `#rrggbb` hex strings and omitted for labels that have no color.
+        """
+        entries = []
+        for index, label in lookup.items():
+            entry = {'index': int(index), 'name': label.name}
+            if label.color is not None:
+                entry['color'] = self._color_to_hex(label.color)
+            entries.append(entry)
+        return json.dumps({'vxlabels': entries})
+
+    def _labels_from_json(self, text: str | bytes) -> vx.LabelLookup | None:
+        """
+        Parse a label lookup table from a JSON string, returning None if the text
+        is not a recognized `vxlabels` block.
+        """
+        if isinstance(text, bytes):
+            try:
+                text = text.decode('utf-8')
+            except UnicodeDecodeError:
+                return None
+        try:
+            data = json.loads(text)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(data, dict) or 'vxlabels' not in data:
+            return None
+
+        lookup = vx.LabelLookup()
+        for entry in data['vxlabels']:
+            color = entry.get('color')
+            if color is not None:
+                color = self._color_from_hex(color)
+            lookup[int(entry['index'])] = vx.Label(entry['name'], color)
+        return lookup
+
     def load(self, filename: os.PathLike) -> vx.Volume:
         """
         Read array from a Nifti file.
@@ -137,10 +185,17 @@ class NiftiArrayIO(IOProtocol):
 
             print(warning)
 
-        # 
+        #
         volume.geometry.reference['nii'] = NiftiHeaderReference(nii)
 
-        # 
+        # read an embedded label lookup table, if present
+        for ext in nii.header.extensions:
+            labels = self._labels_from_json(ext.get_content())
+            if labels is not None:
+                volume.labels = labels
+                break
+
+        #
         return volume
 
     def save(self, volume: vx.Volume, filename: os.PathLike) -> None:
@@ -194,6 +249,12 @@ class NiftiArrayIO(IOProtocol):
         nii.set_sform(affine, 1 if not matches_original else ref.sform_code)
         nii.set_qform(affine, 1 if not matches_original else ref.qform_code)
 
+        # embed the label lookup table as a json comment extension
+        if volume.labels:
+            payload = self._labels_to_json(volume.labels).encode('utf-8')
+            nii.header.extensions.append(self.nib.nifti1.Nifti1Extension('comment', payload))
+            nii.header.set_intent('label')
+
         # write
         self.nib.save(nii, filename)
 
@@ -212,6 +273,32 @@ class MghArrayIO(IOProtocol):
             raise ImportError('the `surfa` python package must be installed for mgh volume IO')
         self.sf = sf
 
+    def _labels_to_surfa(self, lookup: vx.LabelLookup):
+        """
+        Convert a label lookup table into a surfa `LabelLookup`. surfa requires a
+        color per entry, so labels without one are assigned black.
+        """
+        sf_lookup = self.sf.LabelLookup()
+        for index, label in lookup.items():
+            if label.color is None:
+                color = [0, 0, 0]
+            else:
+                color = [int(round(float(c) * 255)) for c in label.color]
+            sf_lookup[int(index)] = (label.name, color)
+        return sf_lookup
+
+    def _labels_from_surfa(self, sf_lookup) -> vx.LabelLookup:
+        """
+        Convert a surfa `LabelLookup` into a voxel label lookup table.
+        """
+        lookup = vx.LabelLookup()
+        for index, element in sf_lookup.items():
+            color = None
+            if getattr(element, 'color', None) is not None:
+                color = [float(c) / 255.0 for c in element.color[:3]]
+            lookup[int(index)] = vx.Label(element.name, color)
+        return lookup
+
     def load(self, filename: os.PathLike) -> vx.Volume:
         """
         Read array from a MGH file.
@@ -229,6 +316,9 @@ class MghArrayIO(IOProtocol):
         volume = vx.Volume(data, matrix)
 
         volume.geometry.reference['mgh'] = sv.geom
+
+        if sv.labels is not None:
+            volume.labels = self._labels_from_surfa(sv.labels)
 
         return volume
 
@@ -250,7 +340,9 @@ class MghArrayIO(IOProtocol):
 
         geometry = ref if matches_original else self.sf.ImageGeometry(volume.baseshape, vox2world=affine)
 
-        self.sf.Volume(volume_array, geometry=geometry).save(filename)
+        labels = self._labels_to_surfa(volume.labels) if volume.labels else None
+
+        self.sf.Volume(volume_array, geometry=geometry, labels=labels).save(filename)
 
 
 class PytorchVolumeIO(IOProtocol):

@@ -25,6 +25,10 @@ from .acquisition import cast_orientation
 from .acquisition import cast_acquisition_geometry
 from .acquisition import geometries_equal
 
+from . import labels
+from .labels import Label
+from .labels import LabelLookup
+
 from . import volume
 from .volume import Volume
 from .volume import volumes_equal
@@ -43,3 +47,5 @@ from .io.mesh import load_mesh
 from .io.mesh import save_mesh
 from .io.affine import load_affine
 from .io.affine import save_affine
+from .io.labels import load_labels
+from .io.labels import save_labels
