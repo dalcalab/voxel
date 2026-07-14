@@ -50,3 +50,6 @@ from .io.affine import load_affine
 from .io.affine import save_affine
 from .io.labels import load_labels
 from .io.labels import save_labels
+
+import monocle
+from monocle import Monocle

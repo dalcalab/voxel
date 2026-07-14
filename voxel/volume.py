@@ -1661,6 +1661,17 @@ class Volume:
         """
         return vx.morphology.open(self, iterations, connectivity, iso_thresh)
 
+    # -------------------------------------------------------------------------
+    # image visualization
+    # -------------------------------------------------------------------------
+
+    def show(self, **kwargs) -> None:
+        """
+        Show the volume in a Monocle viewer window. This is a convenience
+        method for `vx.monocle.show(volume)`.
+        """
+        vx.monocle.show(self, **kwargs)
+
 
 def _cast_volume_as_tensor(other: object) -> object:
     """

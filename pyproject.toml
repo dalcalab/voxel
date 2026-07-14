@@ -18,14 +18,11 @@ dynamic = ['version']
 dependencies = [
     'numpy',
     'torch >= 1.12',
+    'monocle-viewer',
 ]
 
 [project.optional-dependencies]
 test = ['pytest', 'nibabel', 'scipy']
-docs = [
-    'mkdocs-material >= 9.5',
-    'mkdocstrings[python] >= 0.27',
-]
 
 [build-system]
 requires = ['setuptools']
