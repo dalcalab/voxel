@@ -982,6 +982,56 @@ def cast_orientation(obj: Orientation | str | vx.AffineMatrix) -> Orientation:
     return Orientation(obj)
 
 
+def geometry_from_spacing(
+    baseshape: torch.Size,
+    spacing: float | torch.Tensor,
+    orientation: Orientation | str = 'RAS',
+    space: vx.Space = 'world',
+    device: torch.device | None = None) -> AcquisitionGeometry:
+    """
+    Construct an acquisition geometry with a given voxel spacing and anatomical
+    orientation, centered at the world origin.
+
+    Args:
+        baseshape (Size): The spatial shape (3D dimensions) of the acquisition.
+        spacing (float | Tensor): Voxel spacing. An isotropic spacing is assumed
+            if a scalar is provided.
+        orientation (Orientation | str): Anatomical orientation of the voxel
+            coordinate system.
+        space (Space): Space of the spacing components. If 'world', components are
+            ordered along the world axes and permuted to the corresponding grid
+            dimensions. If 'voxel', they map directly to the grid dimensions.
+        device (device, optional): Device to store the matrix on. If None, the
+            device of the `spacing` tensor is used.
+
+    Returns:
+        AcquisitionGeometry: Constructed geometry.
+    """
+    if not torch.is_tensor(spacing):
+        spacing = torch.tensor(spacing, dtype=torch.float32)
+    if spacing.ndim == 0:
+        spacing = spacing.repeat(3)
+    if spacing.ndim != 1 or spacing.shape[0] != 3:
+        raise ValueError(f'expected 3D spacing, got {spacing.ndim}D')
+
+    if device is None:
+        device = spacing.device
+    else:
+        spacing = spacing.to(device)
+
+    orientation = cast_orientation(orientation)
+    if vx.Space(space) == 'world':
+        spacing = spacing[orientation.dims]
+
+    matrix = torch.zeros(4, 4, device=device)
+    matrix[3, 3] = 1
+    matrix[orientation.dims, torch.arange(3)] = orientation.flip.to(device) * spacing
+    center = (torch.tensor(baseshape, device=device) - 1) / 2
+    matrix[:3, -1] = -matrix[:3, :3] @ center
+
+    return AcquisitionGeometry(baseshape, matrix)
+
+
 def geometries_equal(
     a: AcquisitionGeometry,
     b: AcquisitionGeometry,

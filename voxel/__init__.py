@@ -24,6 +24,7 @@ from .acquisition import Orientation
 from .acquisition import cast_orientation
 from .acquisition import cast_acquisition_geometry
 from .acquisition import geometries_equal
+from .acquisition import geometry_from_spacing
 
 from . import labels
 from .labels import Label
