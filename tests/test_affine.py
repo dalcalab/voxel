@@ -125,6 +125,34 @@ def test_angles_to_rotation_matrix() -> None:
     assert torch.allclose(degrees, radians, atol=1e-6)
 
 
+def test_euler_convention() -> None:
+
+    # angles follow the standard right-handed convention: a 90 degree x
+    # rotation maps +y to +z, matching the quaternion convention below
+    mapped = vx.affine.angles_to_rotation_matrix(torch.tensor([90.0, 0, 0])).transform(torch.tensor([0.0, 1, 0]))
+    assert torch.allclose(mapped, torch.tensor([0.0, 0, 1]), atol=1e-6)
+
+    # single-axis Euler angles match the equivalent quaternion rotation
+    theta = math.radians(37.0)
+    for axis in range(3):
+        angles = torch.zeros(3)
+        angles[axis] = math.degrees(theta)
+        quaternion = torch.zeros(4)
+        quaternion[0] = math.cos(theta / 2)
+        quaternion[axis + 1] = math.sin(theta / 2)
+        q = vx.affine.quaternion_to_rotation_matrix(quaternion).tensor[:3, :3]
+        e = vx.affine.angles_to_rotation_matrix(angles).tensor[:3, :3]
+        assert torch.allclose(e, q, atol=1e-6)
+
+    # multi-axis angles compose as Rx @ Ry @ Rz
+    angles = torch.tensor([25.0, -40, 65])
+    rx = vx.affine.angles_to_rotation_matrix(torch.tensor([angles[0], 0, 0]))
+    ry = vx.affine.angles_to_rotation_matrix(torch.tensor([0, angles[1], 0]))
+    rz = vx.affine.angles_to_rotation_matrix(torch.tensor([0, 0, angles[2]]))
+    composed = vx.affine.angles_to_rotation_matrix(angles)
+    assert torch.allclose(composed.tensor, (rx @ ry @ rz).tensor, atol=1e-6)
+
+
 def test_quaternion_to_rotation_matrix() -> None:
 
     # the identity quaternion is the identity rotation

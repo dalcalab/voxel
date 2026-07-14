@@ -20,9 +20,19 @@ dependencies = [
     'torch >= 1.12',
 ]
 
+[project.optional-dependencies]
+test = ['pytest', 'nibabel', 'scipy']
+docs = [
+    'mkdocs-material >= 9.5',
+    'mkdocstrings[python] >= 0.27',
+]
+
 [build-system]
 requires = ['setuptools']
 build-backend = 'setuptools.build_meta'
+
+[tool.pytest.ini_options]
+testpaths = ['tests']
 
 [tool.setuptools]
 packages = ['voxel', 'voxel.io']

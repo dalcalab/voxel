@@ -1,21 +1,8 @@
-import itertools
 import torch
 import random
 import voxel as vx
 
-
-def all_orientations() -> list:
-    """
-    Returns all 48 possible grid orientations in world space.
-    """
-    data = ['LR', 'PA', 'IS']
-    choices = [(item[0], item[1]) for item in data]
-    orders = list(itertools.permutations(choices))
-    orientations = []
-    for order in orders:
-        perms = list(itertools.product(*order))
-        orientations.extend([''.join(p) for p in perms])
-    return orientations
+from conftest import all_orientations
 
 
 def test_orientation_init() -> None:
