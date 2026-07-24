@@ -236,10 +236,8 @@ class NiftiArrayIO(IOProtocol):
             affine = ref.affine
             spacing = ref.spacing
 
-        # set spatial and temporal spacing
+        # reset pixdim; qfac and spatial spacing are (re)written after set_qform below
         nii.header['pixdim'][:] = 1
-        nii.header['pixdim'][4] = 1 if not matches_original else ref.channel_spacing
-        nii.header['pixdim'][1:4] = spacing
 
         # set units - fallback to mm and seconds
         default = np.asarray(2, dtype=np.uint8) | np.asarray(8, dtype=np.uint8)
@@ -248,6 +246,10 @@ class NiftiArrayIO(IOProtocol):
         # geometry-specific header data
         nii.set_sform(affine, 1 if not matches_original else ref.sform_code)
         nii.set_qform(affine, 1 if not matches_original else ref.qform_code)
+
+        # set pixdim after qform, to avoid it clobbering the spacing (when there is shear)
+        nii.header['pixdim'][1:4] = spacing
+        nii.header['pixdim'][4] = 1 if not matches_original else ref.channel_spacing
 
         # embed the label lookup table as a json comment extension
         if volume.labels:
