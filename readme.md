@@ -1,5 +1,9 @@
 # Voxel
 
+<!-- hy-mt2-i18n:start -->
+**English** · [中文](./README_zh-CN.md) · [日本語](./README_ja.md) · [Español](./README_es.md)
+<!-- hy-mt2-i18n:end -->
+
 Core utilities for volumetric (3D) medical image analysis, written in pytorch. Voxel provides methods for working with image grid data and triangular meshes, with consideration of their representation in a world (or scanner) coordinate system. The toolbox is fully GPU compatible and developed with particular emphasis on its use for deep-learning applications. More documentation to come soon!
 
 Voxel can be installed with:
