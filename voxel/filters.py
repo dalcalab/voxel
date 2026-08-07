@@ -102,14 +102,7 @@ def box_filter(
     components, space = vx.arguments.extract_space(components, space)
     size = vx.arguments.merge_components(size, components)
     size = volume.geometry.conform_units(size, space, 'voxel')
-    kernel_size = (torch.round((size - 1) / 2) * 2 + 1).int().clamp(min=1)
-
-    # don't filter volume dimensions of size 1
-    for i, s in enumerate(volume.baseshape):
-        if s == 1:
-            kernel_size[i] = 1
-
-    kernels = [torch.ones(int(k), device=volume.device) / int(k) for k in kernel_size]
+    kernels = _box_kernels(size, volume.baseshape, volume.device)
     if not separable:
         kernels = _dense_kernel(kernels)
     return apply_filter(volume, kernels, stride=stride, padding_mode=padding_mode)
@@ -225,6 +218,24 @@ def _filter_tensor(
             result = conv(result, weight, groups=channels, stride=dim_stride)
 
     return result.squeeze(0)
+
+
+def _box_kernels(
+    size: torch.Tensor,
+    shape: torch.Size,
+    device: torch.device | None = None) -> list:
+    """
+    Build three separable 1D uniform kernels of a given voxel extent, normalized
+    so that filtering with them yields a local mean.
+    """
+    kernel_size = (torch.round((size - 1) / 2) * 2 + 1).int().clamp(min=1)
+
+    # don't filter dimensions of size 1
+    for i, s in enumerate(shape):
+        if s == 1:
+            kernel_size[i] = 1
+
+    return [torch.ones(int(k), device=device) / int(k) for k in kernel_size]
 
 
 def _dense_kernel(kernels: list) -> torch.Tensor:
