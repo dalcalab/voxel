@@ -1202,7 +1202,7 @@ class Volume:
         mode: str = 'linear',
         padding_mode: str = 'zeros',
         fill: float = 0,
-        antialias: bool = False) -> Volume:
+        antialias: bool | float = False) -> Volume:
         """
         Resample the volume features to match the geometry of a target volume.
 
@@ -1211,14 +1211,15 @@ class Volume:
             mode (str, optional): Interpolation mode.
             padding_mode (str, optional): Padding mode for outside grid values.
             fill (float, optional): Out of bounds value used for fill padding mode.
-            antialias (bool, optional): If True, will apply a Gaussian filter
-                before resampling to avoid aliasing artifacts.
+            antialias (bool or float, optional): If True, will apply a Gaussian
+                filter before resampling to avoid aliasing artifacts, with a
+                standard deviation of a third of the downsampling factor. A float
+                sets that proportion instead.
 
         Returns:
             Volume: Resampled volume instance.
         """
-        if isinstance(target, Volume):
-            target = target.geometry
+        target = vx.cast_acquisition_geometry(target)
 
         # check if the matrices are similar because we might be able to avoid any
         # actual resampling if that's the case. first, we check the rotation and scale
@@ -1252,11 +1253,13 @@ class Volume:
                 b = upper.clamp(min=0)
                 padding = torch.stack((b, a), dim=1).flatten()
                 if (padding != 0).any():
-                    mode = dict(zeros='constant', reflection='reflect', border='replicate').get(padding_mode)
+                    mode = dict(zeros='constant', fill='constant', reflection='reflect',
+                                border='replicate').get(padding_mode)
                     if mode is None:
                         raise ValueError(f'no padding mode equivolent for {padding_mode}')
                     reverse = list(reversed([int(d) for d in padding]))
-                    resampled = torch.nn.functional.pad(resampled, reverse, mode=mode)
+                    value = float(fill) if padding_mode == 'fill' else 0
+                    resampled = torch.nn.functional.pad(resampled, reverse, mode=mode, value=value)
 
                 return self.new(resampled, target)
     
@@ -1280,12 +1283,13 @@ class Volume:
             inter_space = vx.AcquisitionGeometry(target.baseshape, transform)
             down_factor = inter_space.spacing.clamp(1).floor().int()
 
-            # blur with a sigma of 1/3 of the downsample factor
-            sigma = (down_factor > 1) * (down_factor.float() / 3)
+            # blur with a sigma proportional to the downsample factor, leaving any
+            # axis that is not being downsampled alone
+            factor = 1 / 3 if antialias is True else float(antialias)
+            sigma = (down_factor > 1) * (down_factor.float() * factor)
 
-            # compute the padding required for the Gaussian kernel (hardcoded the truncate value)
-            # along with the updated grid transform
-            truncate = 2
+            # compute the padding required for the Gaussian kernel
+            truncate = 3  # TODO: set this as the filter default
             padding = (truncate * sigma + 0.5).int()
             intermediate_baseshape = [int(s * f) + p * 2 for s, f, p in zip(target.baseshape, down_factor, padding)]
             transform = inter_space.scale(1 / down_factor, space='voxel').shift(-padding, space='voxel')
@@ -1313,8 +1317,7 @@ class Volume:
             resampled[out_of_bounds.unsqueeze(0)] = fill
 
         if antialias:
-            kernels = [vx.filters.gaussian_kernel_1d(float(s), truncate, device=resampled.device)
-                       for s in sigma]
+            kernels = [vx.filters.gaussian_kernel_1d(float(s), truncate, device=resampled.device) for s in sigma]
             resampled = vx.filters._filter_tensor(resampled, kernels, stride=tuple(down_factor),
                                                   padding='valid')
 
@@ -1331,7 +1334,7 @@ class Volume:
         slice_spacing: float | torch.Tensor = None,
         mode: str = 'linear',
         padding_mode: str = 'zeros',
-        antialias: bool = False) -> Volume:
+        antialias: bool | float = False) -> Volume:
         """
         Resample voxel features to a new voxel grid spacing.
 
@@ -1346,8 +1349,10 @@ class Volume:
                 except with the `spacing` argument.
             mode (str, optional): Interpolation mode.
             padding_mode (str, optional): Padding mode for outside grid values.
-            antialias (bool, optional): If True, will apply a Gaussian filter
-                before resampling to avoid aliasing artifacts.
+            antialias (bool or float, optional): If True, will apply a Gaussian
+                filter before resampling to avoid aliasing artifacts, with a
+                standard deviation of a third of the downsampling factor. A float
+                sets that proportion instead.
 
         Returns:
             Volume: Volume resampled to the target voxel spacing.
