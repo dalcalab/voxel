@@ -188,14 +188,14 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         Origin coordinate of the acquisition grid in world space.
         """
-        return self.transform(torch.zeros(3, device=self.device))
+        return self.map(torch.zeros(3, device=self.device))
 
     @vx.caching.cached
     def center(self) -> torch.Tensor:
         """
         Center coordinate of the acquisition grid in world space.
         """
-        return self.transform((torch.tensor(self.baseshape, device=self.device) - 1) / 2)
+        return self.map((torch.tensor(self.baseshape, device=self.device) - 1) / 2)
 
     def local_coordinate_transform(self,
         space: vx.Space = 'voxel',
@@ -745,7 +745,7 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         if not isinstance(bounds, vx.BoundingBox):
             raise TypeError(f'bounds must be a BoundingBox, got {type(bounds).__name__}')
-        points = self.inverse().transform(bounds.corner_points().detach())
+        points = self.inverse().map(bounds.corner_points().detach())
 
         # keep only voxel centers inside the box
         minc = points.amin(0).ceil().int()

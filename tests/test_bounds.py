@@ -191,7 +191,7 @@ def test_transform() -> None:
 
     # for a rigid transform, the box corners map exactly
     transformed = box.transform(matrix)
-    expected = matrix.transform(box.corner_points())
+    expected = matrix.map(box.corner_points())
     assert torch.allclose(transformed.corner_points(), expected, atol=1e-4)
     assert box_volume(transformed) == pytest.approx(box_volume(box), rel=1e-4)
 

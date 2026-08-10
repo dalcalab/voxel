@@ -167,7 +167,7 @@ def test_crop_world_invariance(small_volume) -> None:
     cropped = small_volume[:, 2:8, 3:9, 4:10]
     assert cropped.baseshape == (6, 6, 6)
     assert torch.equal(cropped.tensor, small_volume.tensor[:, 2:8, 3:9, 4:10])
-    original_coord = small_volume.geometry.transform(torch.tensor([2.0, 3, 4]))
+    original_coord = small_volume.geometry.map(torch.tensor([2.0, 3, 4]))
     assert torch.allclose(cropped.geometry.origin, original_coord, atol=1e-5)
 
     # cropping to the volume's own bounds is an identity
@@ -201,7 +201,7 @@ def test_crop_by_bounding_box(small_volume) -> None:
     cropped = small_volume.crop(other.bounds(nonzero=True))
     assert cropped.baseshape == (3, 3, 3)
     assert torch.equal(cropped.tensor, small_volume.tensor[:, 3:6, 4:7, 5:8])
-    block_corner = small_volume.geometry.transform(torch.tensor([3.0, 4, 5]))
+    block_corner = small_volume.geometry.map(torch.tensor([3.0, 4, 5]))
     assert torch.allclose(cropped.geometry.origin, block_corner, atol=1e-5)
 
 
@@ -224,7 +224,7 @@ def test_bounds_nonzero() -> None:
     tensor[2, 2:4, 6:9, 5:8] = 1
     volume = vx.Volume(tensor, geometry)
     bounds = volume.bounds(nonzero=True)
-    voxels = geometry.inverse().transform(bounds.corner_points())
+    voxels = geometry.inverse().map(bounds.corner_points())
     assert torch.allclose(voxels.amin(0), torch.tensor([1.5, 3.5, 4.5]), atol=1e-4)
     assert torch.allclose(voxels.amax(0), torch.tensor([5.5, 8.5, 7.5]), atol=1e-4)
 
@@ -240,7 +240,7 @@ def test_crop_to_nonzero() -> None:
     cropped = volume.crop_to_nonzero()
     assert cropped.baseshape == (3, 3, 3)
     assert bool((cropped.tensor == 1).all())
-    block_corner = geometry.transform(torch.tensor([3.0, 4, 5]))
+    block_corner = geometry.map(torch.tensor([3.0, 4, 5]))
     assert torch.allclose(cropped.geometry.origin, block_corner, atol=1e-5)
 
     # a voxel margin expands the crop around the block
@@ -280,7 +280,7 @@ def test_transform_resample() -> None:
     centroid = blob.centroids('world')[0]
     moved = blob.transform(trf, resample=True)
     assert moved.baseshape == blob.baseshape
-    assert torch.allclose(moved.centroids('world')[0], trf.transform(centroid), atol=0.05)
+    assert torch.allclose(moved.centroids('world')[0], trf.map(centroid), atol=0.05)
 
 
 def test_transform_warp() -> None:
@@ -288,7 +288,7 @@ def test_transform_warp() -> None:
     # a warp input always resamples, pinned to the warp grid
     blob = blob_volume()
     offset = torch.tensor([3.0, -2.0, 1.5])
-    grid = blob.geometry.transform(vx.volume.volume_grid(blob.baseshape))
+    grid = blob.geometry.map(vx.volume.volume_grid(blob.baseshape))
     warp = vx.Warp(grid + offset, blob.geometry)
 
     centroid = blob.centroids('world')[0]
@@ -384,7 +384,7 @@ def test_slice(small_volume) -> None:
     sliced = small_volume.slice(3, 1, 'voxel')
     assert sliced.baseshape == (10, 1, 14)
     assert torch.equal(sliced.tensor, small_volume.tensor[:, :, 3:4])
-    coord = small_volume.geometry.transform(torch.tensor([0.0, 3, 0]))
+    coord = small_volume.geometry.map(torch.tensor([0.0, 3, 0]))
     assert torch.allclose(sliced.geometry.origin, coord, atol=1e-5)
 
     with pytest.raises(NotImplementedError):

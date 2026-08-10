@@ -68,9 +68,9 @@ def test_slice_direction(geometry) -> None:
 
 
 def test_origin_center_fov(geometry) -> None:
-    assert torch.allclose(geometry.origin, geometry.transform(torch.zeros(3)))
+    assert torch.allclose(geometry.origin, geometry.map(torch.zeros(3)))
     center_voxel = (torch.tensor(geometry.baseshape) - 1) / 2
-    assert torch.allclose(geometry.center, geometry.transform(center_voxel))
+    assert torch.allclose(geometry.center, geometry.map(center_voxel))
     expected_fov = geometry.spacing * torch.tensor(geometry.baseshape)
     assert torch.allclose(geometry.fov, expected_fov, atol=1e-5)
 
@@ -153,7 +153,7 @@ def test_pad_trim_inverse(geometry, space) -> None:
 
     # world coordinates of retained voxels are unchanged
     voxel_margin = geometry.conform_units(margin, space, 'voxel', 2).round()[:, 0]
-    assert torch.allclose(padded.transform(voxel_margin), geometry.origin, atol=1e-5)
+    assert torch.allclose(padded.map(voxel_margin), geometry.origin, atol=1e-5)
 
 
 def test_reshape(geometry) -> None:
@@ -201,7 +201,7 @@ def test_bounds_box(geometry) -> None:
     # the outermost voxel centers
     bounds = geometry.bounds()
     assert isinstance(bounds, vx.BoundingBox)
-    voxels = geometry.inverse().transform(bounds.corner_points())
+    voxels = geometry.inverse().map(bounds.corner_points())
     shape = torch.tensor(geometry.baseshape).float()
     assert torch.allclose(voxels.amin(0), torch.full((3,), -0.5), atol=1e-4)
     assert torch.allclose(voxels.amax(0), shape - 0.5, atol=1e-4)

@@ -51,20 +51,20 @@ def test_transform() -> None:
 
     # known scaling + translation applied to a single point
     point = torch.tensor([1.0, 1, 1])
-    assert torch.allclose(matrix.transform(point), torch.tensor([3.0, 5, 7]))
+    assert torch.allclose(matrix.map(point), torch.tensor([3.0, 5, 7]))
 
     # leading dimensions are preserved for batched coordinates
     for shape in [(3,), (5, 3), (4, 6, 3)]:
         coords = torch.rand(shape)
-        assert matrix.transform(coords).shape == coords.shape
+        assert matrix.map(coords).shape == coords.shape
 
     # the identity leaves coordinates unchanged
     coords = torch.rand(7, 3)
-    assert torch.allclose(vx.AffineMatrix().transform(coords), coords)
+    assert torch.allclose(vx.AffineMatrix().map(coords), coords)
 
     # the trailing dimension must be of size 3
     with pytest.raises(ValueError):
-        matrix.transform(torch.zeros(5, 4))
+        matrix.map(torch.zeros(5, 4))
 
 
 def test_inverse() -> None:
@@ -77,7 +77,7 @@ def test_inverse() -> None:
 
     # inverting the transform inverts the coordinate mapping
     coords = torch.rand(10, 3)
-    assert torch.allclose(matrix.inverse().transform(matrix.transform(coords)), coords, atol=1e-4)
+    assert torch.allclose(matrix.inverse().map(matrix.map(coords)), coords, atol=1e-4)
 
 
 def test_matmul() -> None:
@@ -87,7 +87,7 @@ def test_matmul() -> None:
 
     # composition matches applying the two transforms in sequence
     coords = torch.rand(8, 3)
-    assert torch.allclose((a @ b).transform(coords), a.transform(b.transform(coords)), atol=1e-5)
+    assert torch.allclose((a @ b).map(coords), a.map(b.map(coords)), atol=1e-5)
 
     # a 4x4 result stays an AffineMatrix, other shapes fall back to a raw tensor
     assert isinstance(a @ b, vx.AffineMatrix)
@@ -101,7 +101,7 @@ def test_translation_matrix() -> None:
     assert torch.equal(matrix.tensor[:3, 3], torch.tensor([1.0, 2, 3]))
 
     # translation shifts points by the given vector
-    assert torch.allclose(matrix.transform(torch.zeros(3)), torch.tensor([1.0, 2, 3]))
+    assert torch.allclose(matrix.map(torch.zeros(3)), torch.tensor([1.0, 2, 3]))
 
     # only a 3-vector is accepted
     with pytest.raises(ValueError):
@@ -129,7 +129,7 @@ def test_euler_convention() -> None:
 
     # angles follow the standard right-handed convention: a 90 degree x
     # rotation maps +y to +z, matching the quaternion convention below
-    mapped = vx.affine.angles_to_rotation_matrix(torch.tensor([90.0, 0, 0])).transform(torch.tensor([0.0, 1, 0]))
+    mapped = vx.affine.angles_to_rotation_matrix(torch.tensor([90.0, 0, 0])).map(torch.tensor([0.0, 1, 0]))
     assert torch.allclose(mapped, torch.tensor([0.0, 0, 1]), atol=1e-6)
 
     # single-axis Euler angles match the equivalent quaternion rotation
@@ -166,7 +166,7 @@ def test_quaternion_to_rotation_matrix() -> None:
 
     # a 90 degree rotation about x maps +y to +z (scalar-first convention)
     quaternion = torch.tensor([math.cos(math.pi / 4), math.sin(math.pi / 4), 0, 0])
-    mapped = vx.affine.quaternion_to_rotation_matrix(quaternion).transform(torch.tensor([0.0, 1, 0]))
+    mapped = vx.affine.quaternion_to_rotation_matrix(quaternion).map(torch.tensor([0.0, 1, 0]))
     assert torch.allclose(mapped, torch.tensor([0.0, 0, 1]), atol=1e-6)
 
     # a quaternion must have four entries
@@ -188,7 +188,7 @@ def test_compose_affine() -> None:
 
     # components compose as T @ R @ Z @ S: scale then translate a point
     composed = vx.affine.compose_affine(translation=[1.0, 2, 3], scale=[2.0, 3, 4])
-    assert torch.allclose(composed.transform(torch.ones(3)), torch.tensor([3.0, 5, 7]), atol=1e-6)
+    assert torch.allclose(composed.map(torch.ones(3)), torch.tensor([3.0, 5, 7]), atol=1e-6)
 
     # a length-4 rotation is interpreted as a quaternion
     quaternion = torch.tensor([0.5, 1.0, -2.0, 0.3])
@@ -220,10 +220,10 @@ def test_least_squares_alignment() -> None:
     # a known affine relating two point sets should be recovered
     source = torch.rand(30, 3) * 100
     matrix = vx.affine.compose_affine(translation=[3.0, -2, 5], rotation=[10.0, 20, 30], scale=[1.1, 0.9, 1.2])
-    target = matrix.transform(source)
+    target = matrix.map(source)
 
     solved = vx.affine.least_squares_alignment(source, target)
-    assert torch.allclose(solved.transform(source), target, atol=1e-2)
+    assert torch.allclose(solved.map(source), target, atol=1e-2)
     assert torch.allclose(solved.tensor, matrix.tensor, atol=1e-2)
 
 
@@ -235,10 +235,10 @@ def test_least_squares_alignment_float64() -> None:
     source = torch.rand(30, 3, dtype=torch.float64) * 100
     matrix = vx.affine.compose_affine(
         translation=[3.0, -2, 5], rotation=[10.0, 20, 30], scale=[1.1, 0.9, 1.2], dtype=torch.float64)
-    target = matrix.transform(source)
+    target = matrix.map(source)
 
     solved = vx.affine.least_squares_alignment(source, target)
-    assert torch.allclose(solved.transform(source), target, atol=1e-2)
+    assert torch.allclose(solved.map(source), target, atol=1e-2)
 
 
 def test_random_affine() -> None:

@@ -94,7 +94,7 @@ class VectorField(vx.Volume):
             Warp: The corresponding coordinate warp.
         """
         vectors = self.in_space('world').tensor.permute(1, 2, 3, 0)
-        grid = self.geometry.transform(vx.volume.volume_grid(self.baseshape, device=self.device))
+        grid = self.geometry.map(vx.volume.volume_grid(self.baseshape, device=self.device))
         return Warp(grid + vectors, self.geometry)
 
     def integrate(self, coordinates: torch.Tensor, dt: float, method: str = 'euler',
@@ -135,7 +135,7 @@ class VectorField(vx.Volume):
         vector_linear = self.geometry.local_coordinate_transform(self.space, dtype=dtype)[:3, :3]
         to_local = self.geometry.local_coordinate_transform(space, dtype=dtype)
         field = vx.Volume(torch.einsum('ij,jwhd->iwhd', vector_linear, self.tensor.to(dtype)), self.geometry)
-        local = to_local.transform(coordinates.to(dtype))
+        local = to_local.map(coordinates.to(dtype))
 
         steps = max(1, round(time / dt))
         step = time / steps
@@ -149,7 +149,7 @@ class VectorField(vx.Volume):
             else:
                 velocity = field.sample(local, space='local')
             local = local + step * velocity
-        return to_local.inverse().transform(local)
+        return to_local.inverse().map(local)
 
     def exponentiate(self, steps: int) -> VectorField:
         """
@@ -235,7 +235,7 @@ class Warp:
         Returns:
             VectorField: The displacement field.
         """
-        grid = self.geometry.transform(vx.volume.volume_grid(self.baseshape, device=self.device))
+        grid = self.geometry.map(vx.volume.volume_grid(self.baseshape, device=self.device))
         vectors = (self.coordinates - grid).permute(3, 0, 1, 2)
         return VectorField(vectors, geometry=self.geometry, space='world')
 
@@ -284,7 +284,7 @@ def compose_transforms(*transforms: vx.AffineMatrix | Warp) -> vx.AffineMatrix |
                 displacement = warp.as_displacement_field()
                 coordinates = coordinates + displacement.sample(coordinates, space='world')
             elif affine is not None:
-                coordinates = affine.inverse().transform(coordinates)
+                coordinates = affine.inverse().map(coordinates)
             warp = Warp(coordinates, transform.geometry)
         elif isinstance(transform, vx.AffineMatrix):
             if warp is not None:

@@ -166,7 +166,7 @@ def test_flood_fill() -> None:
     assert filled.tensor[0, 1, 1, 1] == 0
 
     # world-space seed points are supported
-    world = volume.geometry.transform(torch.tensor([6.0, 6, 6]))
+    world = volume.geometry.map(torch.tensor([6.0, 6, 6]))
     assert torch.equal(vx.morphology.flood_fill(volume, world, space='world').tensor, filled.tensor)
 
     # a background seed fills the connected background region

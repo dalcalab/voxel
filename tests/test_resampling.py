@@ -85,14 +85,14 @@ def test_world_point_sampling(brain) -> None:
     # linear sampling at exact grid points reproduces the voxel values
     vol = brain.float()
     voxels = torch.tensor([[50.0, 60, 70], [100, 120, 90], [128, 128, 128]])
-    sampled = vol.sample(vol.geometry.transform(voxels), space='world')
+    sampled = vol.sample(vol.geometry.map(voxels), space='world')
     expected = torch.stack([vol.tensor[:, int(v[0]), int(v[1]), int(v[2])] for v in voxels])
     assert sampled.shape == (3, 1)
     assert torch.allclose(sampled, expected, atol=5e-3)
 
     # nearest sampling of an integer volume preserves dtype and label values
     labels = (vol > 100).int()
-    points = vol.geometry.transform(torch.rand(100, 3) * 200 + 20)
+    points = vol.geometry.map(torch.rand(100, 3) * 200 + 20)
     nearest = labels.sample(points, space='world', mode='nearest')
     assert nearest.dtype == labels.dtype
     assert bool(torch.isin(nearest.unique(), labels.unique()).all())

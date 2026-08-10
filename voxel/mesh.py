@@ -360,7 +360,7 @@ class Mesh:
         Returns:
             Mesh: Transformed mesh.
         """
-        return Mesh(transform.transform(self.vertices), self.faces)
+        return Mesh(transform.map(self.vertices), self.faces)
 
     def bounds(self,
         margin: float | torch.Tensor | None = None,

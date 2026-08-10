@@ -121,8 +121,8 @@ def test_strided_filter_geometry(small_volume) -> None:
 
     # voxel v of the strided output sits at voxel 2v of the input grid
     v = torch.tensor([1.0, 2, 3])
-    assert torch.allclose(filtered.geometry.transform(v),
-                          small_volume.geometry.transform(2 * v), atol=1e-4)
+    assert torch.allclose(filtered.geometry.map(v),
+                          small_volume.geometry.map(2 * v), atol=1e-4)
 
     # the strided tensor equals the unstrided result subsampled
     unstrided = vx.filters.gaussian_filter(small_volume, 1.0, 'voxel')

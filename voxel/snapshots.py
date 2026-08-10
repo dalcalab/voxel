@@ -115,7 +115,7 @@ def snapshot(
     if coord is not None:
         # render a single slice at the plane passing through the world coordinate
         coord = torch.as_tensor(coord, dtype=torch.float32, device=geometry.device)
-        index = int(geometry.inverse().transform(coord)[0].round().clamp(0, baseshape[0] - 1))
+        index = int(geometry.inverse().map(coord)[0].round().clamp(0, baseshape[0] - 1))
         target = geometry.shift([index, 0, 0], space='voxel')
         target = target.reshape((1, *geometry.baseshape[1:]), from_origin=True)
     else:
@@ -225,10 +225,9 @@ def snapshot(
                 eroded = 1 - torch.nn.functional.max_pool2d(1 - binary, 3, stride=1, padding=1)
                 image = torch.where((binary - eroded) > 0.5, color.view(3, 1, 1, 1), image)
 
-    # quantize to 8-bit and split the stack into per-slice 2D images, moving
-    # the RGB dim last to match the channels-last image convention
+    # quantize to 8-bit and split the stack into per-slice 2D images
     image = (image.clamp(0, 1).detach() * 255).round().to(torch.uint8)
-    slices = list(image.permute(1, 2, 3, 0).unbind(dim=0))
+    slices = list(image.movedim(0, -1).unbind(dim=0))
     return slices[0] if len(slices) == 1 else slices
 
 

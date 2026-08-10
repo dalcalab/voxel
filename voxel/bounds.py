@@ -398,7 +398,7 @@ class BoundingBox:
         # any change in axis length into the extent
         axes = linear @ self._rotation
         factor = axes.norm(dim=0)
-        return BoundingBox(center=matrix.transform(self._center),
+        return BoundingBox(center=matrix.map(self._center),
                            rotation=axes / factor,
                            extent=self._extent * factor)
 

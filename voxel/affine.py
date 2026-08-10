@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import TypeVar
 
 import os
+import warnings
 import torch
 import voxel as vx
 
@@ -149,15 +150,15 @@ class AffineMatrix:
         """
         return AffineMatrix(self.tensor.inverse(), dtype=self.tensor.dtype)
 
-    def transform(self, coords: torch.Tensor) -> torch.Tensor:
+    def map(self, coords: torch.Tensor) -> torch.Tensor:
         """
-        Apply the matrix transformation to a set of 3D coordinates.
+        Map a set of 3D coordinates through the matrix transform.
 
         Args:
             coords (Tensor): A tensor of coordinates with shape (..., 3).
 
         Returns:
-            Tensor: Transformed coordinates with the same shape as the input.
+            Tensor: Mapped coordinates with the same shape as the input.
         """
         if coords.shape[-1] != 3:
             raise ValueError('Coordinates must have a last dimension of size 3.')
@@ -168,6 +169,14 @@ class AffineMatrix:
         linear = matrix[:3, :3].to(coords.dtype)
         translation = matrix[:3, 3].to(coords.dtype)
         return coords @ linear.T + translation
+
+    def transform(self, coords: torch.Tensor) -> torch.Tensor:
+        """
+        Deprecated alias of `map`.
+        """
+        warnings.warn('AffineMatrix.transform() is deprecated, use map() instead',
+                      DeprecationWarning, stacklevel=2)
+        return self.map(coords)
 
 
 def translation_matrix(translation: torch.Tensor) -> AffineMatrix:

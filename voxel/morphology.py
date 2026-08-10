@@ -214,7 +214,7 @@ def flood_fill(
 
     point = torch.as_tensor(point, dtype=torch.float32, device=volume.device)
     if vx.Space(space) == 'world':
-        point = volume.geometry.inverse().transform(point)
+        point = volume.geometry.inverse().map(point)
     point = tuple(point.round().long().cpu().tolist())
     if any(p < 0 or p >= s for p, s in zip(point, volume.baseshape)):
         raise ValueError(f'seed point {list(point)} is outside the '

@@ -909,7 +909,7 @@ class Volume:
         space = vx.Space(space)
         if space != 'local':
             dtype = points.dtype if points.is_floating_point() else torch.float32
-            points = self.geometry.local_coordinate_transform(space, dtype=dtype).transform(points)
+            points = self.geometry.local_coordinate_transform(space, dtype=dtype).map(points)
 
         # point grids of up to 3 leading dims are sampled in their natural shape,
         # avoiding a flattening round trip; higher-dim point sets fall back to flat
@@ -1049,7 +1049,7 @@ class Volume:
 
         # transform to world-space if necessary
         if vx.Space(space) == 'world':
-            centroids = self.geometry.transform(centroids)
+            centroids = self.geometry.map(centroids)
         return centroids
 
     def slice(self,
@@ -1242,7 +1242,7 @@ class Volume:
             # otherwise, it's possible the difference between image spaces is only a voxel-shift,
             # in which case we can just crop and/or pad -- much faster than resampling.
             # we need to check if the voxel-space translations are all integers
-            delta = (self.geometry.inverse() @ target).transform(torch.zeros(3))
+            delta = (self.geometry.inverse() @ target).map(torch.zeros(3))
             delta_rounded = delta.round()
             if torch.allclose(delta, delta_rounded, atol=1e-4, rtol=0):
 
@@ -1709,7 +1709,7 @@ def volume_grid(
     ranges = [torch.arange(s, dtype=torch.float32, device=device) for s in baseshape]
     grid = torch.stack(torch.meshgrid(*ranges, indexing='ij'), dim=-1)
     if transform:
-        grid = transform.transform(grid)
+        grid = transform.map(grid)
     if localshape is not None:
         shape = torch.tensor(localshape).to(grid.device)
         grid = ((2 * grid + 1) / shape - 1).flip(-1)
