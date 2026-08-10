@@ -428,8 +428,6 @@ class Mesh:
 
         # compile the top largest into a single vertex mask
         _, count = np.unique(components, return_counts=True)
-        subset_np = np.in1d(components, count.argsort()[-k:])
+        subset_np = np.isin(components, count.argsort()[-k:])
         vertex_mask = torch.from_numpy(subset_np).to(device=self.vertices.device, dtype=torch.bool)
         return vertex_mask
-
-

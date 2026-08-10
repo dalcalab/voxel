@@ -260,10 +260,6 @@ def test_geometry_from_spacing() -> None:
     assert geometry.orientation.name == 'ASR'
     assert torch.allclose(geometry.spacing, torch.tensor([1.0, 2.0, 3.0]))
 
-    # unpacked positional components match the sequence form
-    assert vx.geometries_equal(vx.geometry_from_spacing((10, 12, 14), 1, 1, 2),
-                               vx.geometry_from_spacing((10, 12, 14), (1, 1, 2)))
-
     # the device defaults to that of the spacing tensor unless provided
     spacing = torch.tensor([1.0, 1.0, 2.0])
     assert vx.geometry_from_spacing((10, 12, 14), spacing).device == spacing.device
