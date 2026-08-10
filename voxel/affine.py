@@ -147,7 +147,7 @@ class AffineMatrix:
         Returns:
             AffineMatrix: Inverted affine matrix.
         """
-        return AffineMatrix(self.tensor.inverse())
+        return AffineMatrix(self.tensor.inverse(), dtype=self.tensor.dtype)
 
     def transform(self, coords: torch.Tensor) -> torch.Tensor:
         """
@@ -168,117 +168,6 @@ class AffineMatrix:
         linear = matrix[:3, :3].to(coords.dtype)
         translation = matrix[:3, 3].to(coords.dtype)
         return coords @ linear.T + translation
-
-
-class AffineVolumeTransform(AffineMatrix):
-    """
-    Affine transform matrix in world or voxel space that contains metadata
-    about the source and target acquisition geometry.
-    """
-
-    def __init__(self,
-        data: torch.Tensor | AffineMatrix,
-        space: vx.Space,
-        source: vx.AcquisitionGeometry | vx.Volume,
-        target: vx.AcquisitionGeometry | vx.Volume) -> None:
-        """
-        Args:
-            data (Tensor | AffineMatrix): A 3x3, 3x4, or 4x4 tensor matrix.
-            space (Space): The coordinate space of the transform.
-            source (AcquisitionGeometry | Volume): The source acquisition geometry.
-            target (AcquisitionGeometry | Volume): The target acquisition geometry.
-        """
-        super().__init__(data)
-        self._source = vx.acquisition.cast_acquisition_geometry(source)
-        self._target = vx.acquisition.cast_acquisition_geometry(target)
-        self._space = vx.Space(space)
-    
-    @property
-    def space(self) -> vx.Space:
-        """
-        Coordinate space of the transform.
-        """
-        return self._space
-    
-    @property
-    def source(self) -> vx.AcquisitionGeometry:
-        """
-        Source acquisition geometry.
-        """
-        return self._source
-    
-    @property
-    def target(self) -> vx.AcquisitionGeometry:
-        """
-        Target acquisition geometry.
-        """
-        return self._target
-
-    def inverse(self) -> AffineVolumeTransform:
-        """
-        Invert the transform.
-
-        Returns:
-            AffineVolumeTransform: Inverted affine transform.
-        """
-        inverse = self.tensor.inverse()
-        return AffineVolumeTransform(inverse, self.space, self.target, self.source)
-
-    def convert(self,
-        space: vx.Space | None = None,
-        source: vx.AcquisitionGeometry | vx.Volume | None = None,
-        target: vx.AcquisitionGeometry | vx.Volume | None = None) -> AffineVolumeTransform:
-        """
-        Convert the transform to a new coordinate space, source, or target.
-
-        Args:
-            space (Space, optional): Desired coordinate space.
-            source (AcquisitionGeometry or Volume, optional): Desired source geometry.
-            target (AcquisitionGeometry or Volume, optional): Desired target geometry.
-
-        Returns:
-            AffineVolumeTransform: Converted affine transform.
-        """
-
-        # check if the desired space is the same as the embedded space
-        space = self.space if space is None else vx.Space(space)
-        same_space = space == self.space
-
-        # check if the desired source is the same as the embedded source
-        if source is None:
-            source = self.source
-            same_source = True
-        else:
-            source = vx.acquisition.cast_acquisition_geometry(source)
-            same_source = torch.allclose(source.tensor, self.source.tensor, atol=1e-4, rtol=0)
-
-        # check if the desired target is the same as the embedded target
-        if target is None:
-            target = self.target
-            same_target = True
-        else:
-            target = vx.acquisition.cast_acquisition_geometry(target)
-            same_target = torch.allclose(target.tensor, self.target.tensor, atol=1e-4, rtol=0)
-
-        # return self if no changes are needed
-        if all((same_space, same_source, same_target)):
-            return self
-
-        if same_source and same_target:
-            # just a simple conversion of transform coordinate space, without
-            # changing source and target information
-            a = self.target if space == 'world' else self.target.inverse()
-            b = self.source if space == 'voxel' else self.source.inverse()
-            affine = a @ self @ b
-        else:
-            # if source and target info is changing, we need to recompute the
-            # transform by first converting it to world-space
-            affine = self if self.space == 'world' else self.target @ self @ self.source.inverse()
-            # then back into the desired coordinate space
-            if space == 'voxel':
-                affine = target.inverse() @ affine @ source
-
-        return AffineVolumeTransform(affine, space, source, target)
 
 
 def translation_matrix(translation: torch.Tensor) -> AffineMatrix:

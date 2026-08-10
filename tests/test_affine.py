@@ -253,22 +253,3 @@ def test_random_affine() -> None:
     # sampled translation stays within the requested bound
     translation = vx.affine.random_affine(max_translation=5).tensor[:3, 3]
     assert bool((translation.abs() <= 5).all())
-
-
-def test_affine_volume_transform() -> None:
-
-    shape = (8, 9, 10)
-    source = vx.AcquisitionGeometry(shape, vx.affine.compose_affine(translation=[1.0, 2, 3], scale=[1.0, 1.2, 0.8]))
-    target = vx.AcquisitionGeometry(shape, vx.affine.compose_affine(translation=[-2.0, 1, 4], rotation=[5.0, 0, 0]))
-    matrix = vx.affine.compose_affine(translation=[2.0, -1, 3], rotation=[3.0, -4, 5])
-    transform = vx.AffineVolumeTransform(matrix, 'world', source, target)
-
-    # inverting swaps source and target and is self-undoing
-    inverse = transform.inverse()
-    assert torch.allclose(inverse.source.tensor, target.tensor)
-    assert torch.allclose(inverse.target.tensor, source.tensor)
-    assert torch.allclose(inverse.inverse().tensor, transform.tensor, atol=1e-5)
-
-    # converting to another space and back is a round trip
-    roundtrip = transform.convert(space='voxel').convert(space='world')
-    assert torch.allclose(roundtrip.tensor, transform.tensor, atol=1e-4)
