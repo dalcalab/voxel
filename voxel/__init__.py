@@ -12,7 +12,6 @@ from . import arguments
 
 from . import affine
 from .affine import AffineMatrix
-from .affine import AffineVolumeTransform
 
 from . import bounds
 from .bounds import BoundingBox
@@ -33,6 +32,11 @@ from .labels import LabelLookup
 from . import volume
 from .volume import Volume
 from .volume import volumes_equal
+
+from . import warp
+from .warp import Warp
+from .warp import VectorField
+from .warp import compose_transforms
 
 from . import mesh
 from .mesh import Mesh

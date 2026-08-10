@@ -197,6 +197,36 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self.transform((torch.tensor(self.baseshape, device=self.device) - 1) / 2)
 
+    def local_coordinate_transform(self,
+        space: vx.Space = 'voxel',
+        dtype: torch.dtype = torch.float32) -> vx.AffineMatrix:
+        """
+        Build the affine transform mapping coordinates in `space` to the flipped
+        [-1, 1] local coordinates used by torch grid sampling, fused into a
+        single matrix so repeated conversions cost one matmul-add pass.
+
+        Args:
+            space (Space, optional): Source coordinate space of the transform.
+            dtype (dtype, optional): Data type of the constructed matrix.
+
+        Returns:
+            AffineMatrix: The space-to-local coordinate transform.
+        """
+        space = vx.Space(space)
+        matrix = torch.eye(4, dtype=dtype, device=self.device)
+        if space == 'local':
+            return vx.AffineMatrix(matrix, dtype=dtype)
+        shape = torch.tensor(self.baseshape, dtype=dtype, device=self.device)
+        scale = 2 / shape
+        if space == 'world':
+            inverse = torch.inverse(self.tensor.to(dtype))
+            matrix[:3, :3] = (scale.unsqueeze(1) * inverse[:3, :3]).flip(0)
+            matrix[:3, 3] = (scale * inverse[:3, 3] + 1 / shape - 1).flip(0)
+        else:
+            matrix[:3, :3] = torch.diag(scale).flip(0)
+            matrix[:3, 3] = (1 / shape - 1).flip(0)
+        return vx.AffineMatrix(matrix, dtype=dtype)
+
     def voxel_to_local_coordinates(self, coords: torch.Tensor) -> torch.Tensor:
         """
         Transform voxel coordinates to flipped local grid coordinates in the
@@ -863,20 +893,20 @@ class AcquisitionGeometry(vx.AffineMatrix):
         return vx.Volume(torch.randn(shape, dtype=dtype, device=self.device), self)
 
 
-def cast_acquisition_geometry(obj: vx.Volume | AcquisitionGeometry) -> AcquisitionGeometry:
+def cast_acquisition_geometry(obj) -> AcquisitionGeometry:
     """
     Cast an object to an AcquisitionGeometry.
 
     Args:
-        obj (Volume | AcquisitionGeometry): Object to cast.
+        obj (Volume | AcquisitionGeometry | Warp): Object to cast.
 
     Returns:
         AcquisitionGeometry: The cast geometry.
     """
-    if isinstance(obj, vx.Volume):
-        return obj.geometry
-    elif isinstance(obj, vx.AcquisitionGeometry):
+    if isinstance(obj, vx.AcquisitionGeometry):
         return obj
+    elif isinstance(obj, (vx.Volume, vx.Warp)):
+        return obj.geometry
     else:
         raise ValueError(f'cannot cast {type(obj)} to AcquisitionGeometry')
 

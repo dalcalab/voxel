@@ -35,15 +35,24 @@ def test_antialiasing(brain) -> None:
 
     # this is a reasonable error bound for this specific case
     error = (aa - noaa).abs().quantile(0.99)
-    assert error > 34 and error < 36
+    assert error > 35 and error < 37
+
+    # a larger sigma proportion should blur further, without moving the sampled grid
+    errors = []
+    for proportion in (0.25, 0.5, 1.0):
+        scaled = vol.resample_like(target, antialias=proportion)
+        assert scaled.baseshape == noaa.baseshape
+        assert torch.allclose(scaled.geometry.tensor, noaa.geometry.tensor)
+        errors.append((scaled - noaa).abs().quantile(0.99))
+    assert errors[0] < error < errors[1] < errors[2]
 
     # make sure smoothing is not applied in situations where it should not be
     # i.e. when the downsampling factor is less than 2
     vol = brain.reorient('IRP').resample((1.8, 1.8, 2))
     target = vol.geometry.reorient('ALS').resample((2.5, 0.6, 0.6))
-    aa = vol.resample_like(target, antialias=True)
     noaa = vol.resample_like(target, antialias=False)
-    assert vx.volumes_equal(aa, noaa)
+    for proportion in (True, 0.5, 1.0):
+        assert vx.volumes_equal(vol.resample_like(target, antialias=proportion), noaa)
 
 
 def test_resample_multichannel(brain) -> None:

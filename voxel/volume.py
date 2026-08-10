@@ -889,42 +889,50 @@ class Volume:
         Sample volume features at a set of points.
 
         Args:
-            points (Tensor | Mesh): A set of points in world or voxel coordinates with
-                shape $(N, 3)$. If the input is a mesh, the vertex positions are used.
+            points (Tensor | Mesh): A set of points in world, voxel, or local grid
+                sampling coordinates with shape $(..., 3)$. If the input is a mesh,
+                the vertex positions are used.
             space (Space): The coordinate space of the input points or mesh.
             mode (str, optional): The sampling mode, either 'linear' or 'nearest'.
             padding_mode (str, optional): Padding mode for outside grid values.
 
         Returns:
-            Tensor: The sampled features, with shape $(N, C)$.
+            Tensor: The sampled features, with shape $(..., C)$.
         """
         if isinstance(points, vx.Mesh):
             points = points.vertices
-        
-        # original base shape
+
+        # original leading shape
         inshape = points.shape[:-1]
-        points = points.view(-1, 3)
 
-        # convert to local coordinate space
-        if vx.Space(space) == 'world':
-            points = self.geometry.inverse().transform(points)
-        points = self.geometry.voxel_to_local_coordinates(points)
+        # convert to the local grid sampling space (broadcasts over any leading dims)
+        space = vx.Space(space)
+        if space != 'local':
+            dtype = points.dtype if points.is_floating_point() else torch.float32
+            points = self.geometry.local_coordinate_transform(space, dtype=dtype).transform(points)
 
-        # sample the channels
+        # point grids of up to 3 leading dims are sampled in their natural shape,
+        # avoiding a flattening round trip; higher-dim point sets fall back to flat
+        if len(inshape) > 3:
+            points = points.reshape(-1, 3)
+        grid = points.reshape(1, *points.shape[:-1], *([1] * (3 - (points.ndim - 1))), 3)
+
+        # sample the channels, ensuring a floating-point dtype without
+        # downcasting volumes of higher precision
+        tensor = self.tensor if self.tensor.is_floating_point() else self.tensor.float()
         sampled = torch.nn.functional.grid_sample(
-            self.tensor.float().unsqueeze(0),
-            points.view(1, len(points), 1, 1, 3),
+            tensor.unsqueeze(0),
+            grid.to(tensor.dtype),
             align_corners=False,
             mode=('bilinear' if mode == 'linear' else 'nearest'),
             padding_mode=padding_mode)
-        
+
         # if nearest neighbor sampling, convert back to original dtype
         if mode == 'nearest':
             sampled = sampled.type(self.dtype)
 
-        # remove batch and spatial dimensions
-        sampled = sampled.squeeze(dim=(0, 3, 4)).swapaxes(0, 1)
-        return sampled.view(*inshape, sampled.size(-1))
+        # remove the batch dim, move channels last, and restore the input shape
+        return sampled.squeeze(0).movedim(0, -1).reshape(*inshape, sampled.size(1))
 
     def tesselate(self, threshold: float = 0.5, space: vx.Space = 'world') -> vx.Mesh:
         """
@@ -1429,61 +1437,55 @@ class Volume:
         return self.pad(-delta, space=space)
 
     def transform(self,
-        transform: vx.AffineVolumeTransform | vx.AffineMatrix,
-        resample: bool = False,
-        negate: bool = False,
+        transform: vx.AffineMatrix | vx.warp.Warp,
+        resample: bool = None,
         mode: str = 'linear',
         padding_mode: str = 'zeros') -> Volume:
         """
-        Apply a spatial transform to the volume. By default, this method will not
-        resample the image data and instead transform the world geometry.
+        Apply a spatial transform to the volume. Affine matrices are assumed to
+        be world-space transforms. By default an affine only moves the world
+        geometry without touching the image data, while a warp always resamples
+        and pins the result to the warp grid domain.
 
         Args:
-            transform (AffineVolumeTransform or AffineMatrix): Transform to apply. Assume
-                a world-space transform if an AffineMatrix is provided.
-            resample (bool, optional): If True, the volume will be transformed and
-                resampled in voxel space, otherwise only the geometry will be updated.
-            negate (bool, optional): If True, the inverse transform is applied to the
-                geometry so that image features do not move in world space. This option
-                can only be enabled when resampling is enabled.
+            transform (AffineMatrix or Warp): Transform to apply.
+            resample (bool, optional): If True, the image data is resampled on
+                its grid. If None, resampling defaults to False for affine
+                inputs and True for warps. Cannot be False for warps.
             mode (str, optional): Interpolation mode if resampling.
-            padding_mode (str, optional): Padding mode for outside grid values if resampling.
+            padding_mode (str, optional): Padding mode for outside grid values
+                if resampling.
 
         Returns:
             Volume: Transformed volume.
         """
+        if isinstance(transform, vx.warp.Warp):
+            if resample is not None and not resample:
+                raise ValueError('cannot apply a warp without resampling')
+            return transform.map(self, mode=mode, padding_mode=padding_mode)
 
-        # if the transform is just a simple matrix, assume it's a world-space transform
-        if not isinstance(transform, vx.AffineVolumeTransform):
-            transform = vx.AffineVolumeTransform(transform, space='world', source=self, target=self)
+        if not isinstance(transform, vx.AffineMatrix):
+            transform = vx.AffineMatrix(transform)
 
         if not resample:
             # just apply the transform to the acquisition geometry
-            if negate:
-                raise ValueError('cannot negate transform when resampling is disabled')
-            transform = transform.convert(space='world')
             return self.new(self.tensor, transform @ self.geometry)
 
-        # if we're resampling, convert to a voxel-to-voxel transform
-        target = transform.target
-        inverted = transform.convert(space='voxel', source=self).inverse()
-
-        # construct the transformed resampling grid
-        grid = volume_grid(target.baseshape, transform=inverted,
+        # resample on the current grid with a voxel-to-voxel pull-back map
+        matrix = self.geometry.inverse() @ transform.inverse() @ self.geometry
+        grid = volume_grid(self.baseshape, transform=matrix,
                            localshape=self.baseshape, device=self.device)
 
+        # ensure a floating-point dtype without downcasting higher precision
+        tensor = self.tensor if self.tensor.is_floating_point() else self.tensor.float()
         interpolated = torch.nn.functional.grid_sample(
-                        self.tensor.unsqueeze(0).float(),
-                        grid.unsqueeze(0),
+                        tensor.unsqueeze(0),
+                        grid.unsqueeze(0).to(tensor.dtype),
                         mode=('bilinear' if mode == 'linear' else mode),
                         padding_mode=padding_mode,
                         align_corners=False).squeeze(0)
 
-        if negate:
-            # apply inverse transform to the geometry to cancel out world space changes
-            target = inverted.convert(space='world') @ target
-
-        return self.new(interpolated, target)
+        return self.new(interpolated, self.geometry)
 
     def pool(self,
         scale: int = 2,

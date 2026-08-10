@@ -9,24 +9,28 @@ space_lookup = {
     'voxel': 'V',
     'image': 'V',
     'world': 'W',
+    'local': 'L',
 }
 
 # reverse lookup mapping each space code to its canonical name
 space_names = {
     'V': 'voxel',
     'W': 'world',
+    'L': 'local',
 }
 
 
 class Space:
     """
-    Designates either the voxel (image grid) or world coordinate space.
+    Designates the voxel (image grid), world, or local coordinate space, where
+    local refers to the flipped [-1, 1] grid-sampling space used by torch.
     """
 
     def __init__(self, space: Space | str) -> None:
         """
         Args:
-            space (Space | str): Coordinate space. A string may be 'voxel' or 'world'.
+            space (Space | str): Coordinate space. A string may be 'voxel',
+                'world', or 'local'.
         """
         if isinstance(space, Space):
             self.code = space.code
