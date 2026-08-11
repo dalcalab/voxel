@@ -1,0 +1,116 @@
+site_name: Voxel
+site_description: Torch framework for volumetric medical imaging structures
+site_url: https://dalcalab.github.io/voxel/
+repo_url: https://github.com/dalcalab/voxel
+repo_name: source
+copyright: Copyright &copy; Andrew Hoopes
+
+extra:
+  generator: false
+
+theme:
+  name: material
+  favicon: assets/favicon.svg
+  logo: assets/logo-light.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Volumes & Geometry: volumes.md
+  - Label Maps: labels.md
+  - Transforms: transforms.md
+  - Meshes: meshes.md
+  - Visualization: visualization.md
+  - API Reference:
+      - Overview: reference/index.md
+      - Classes:
+          - Volume: reference/classes/volume.md
+          - AcquisitionGeometry: reference/classes/acquisition-geometry.md
+          - Orientation: reference/classes/orientation.md
+          - AffineMatrix: reference/classes/affine-matrix.md
+          - BoundingBox: reference/classes/bounding-box.md
+          - LabelLookup: reference/classes/label-lookup.md
+          - Label: reference/classes/label.md
+          - Mesh: reference/classes/mesh.md
+          - Space: reference/classes/space.md
+          - Warp: reference/classes/warp.md
+          - VectorField: reference/classes/vector-field.md
+      - Functions:
+          - io: reference/functions/io.md
+          - volume: reference/functions/volume.md
+          - acquisition: reference/functions/acquisition.md
+          - affine: reference/functions/affine.md
+          - warp: reference/functions/warp.md
+          - bounds: reference/functions/bounds.md
+          - labels: reference/functions/labels.md
+          - filters: reference/functions/filters.md
+          - morphology: reference/functions/morphology.md
+          - snapshots: reference/functions/snapshots.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            extensions:
+              - docs/.scripts/griffe_extensions.py
+            docstring_style: google
+            docstring_options:
+              returns_named_value: false
+            show_source: false
+            separate_signature: false
+            show_signature_annotations: true
+            members_order: source
+            merge_init_into_class: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            docstring_section_style: list
+            filters: ['!^_']
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+extra_css:
+  - https://unpkg.com/katex@0/dist/katex.min.css
+  - stylesheets/extra.css
+
+extra_javascript:
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+  - javascripts/katex.js

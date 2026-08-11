@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- box body: two front faces as one curvy filled silhouette -->
+  <path
+    d="M4 7.5 Q7.5 8.7 12 12 Q16.5 8.7 20 7.5 Q19 12 20 16.5 Q16.5 17.7 12 21 Q7.5 17.7 4 16.5 Q5 12 4 7.5 Z"
+    fill="#1a1915" stroke="#1a1915" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- top face: outline only -->
+  <path
+    d="M4 7.5 Q7.5 6.3 12 3 Q16.5 6.3 20 7.5"
+    fill="none" stroke="#1a1915" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

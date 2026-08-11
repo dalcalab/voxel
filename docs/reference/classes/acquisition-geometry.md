@@ -1,0 +1,3 @@
+# AcquisitionGeometry
+
+::: voxel.AcquisitionGeometry

@@ -8,11 +8,9 @@ The library provides data structures and torch-like operations spanning 3D image
 pip install voxel
 ```
 
-### Documentation
+Voxel is [open source](https://github.com/dalcalab/voxel), and pull requests and bug reports are welcome.
 
-Guides and the full API reference live in the [voxel documentation](DOCS-URL). Pull requests and bug reports are welcome.
-
-### Citation
+## Citation
 
 If voxel is useful in your work, please cite the publication it was originally developed for.
 

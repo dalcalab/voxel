@@ -1,0 +1,210 @@
+/* minimal, warm styling layer on top of mkdocs-material */
+
+:root {
+  --md-text-font: 'Inter';
+  --md-code-font: 'JetBrains Mono';
+}
+
+/* slightly smaller type*/
+html {
+  font-size: 90%;
+}
+
+/* light: warm off-white paper, near-black ink, terracotta accent */
+[data-md-color-scheme='default'] {
+  --md-default-bg-color: #faf9f5;
+  --md-default-fg-color: #1a1915;
+  --md-default-fg-color--light: #5e5d59;
+  --md-typeset-a-color: #c15f3c;
+  --md-accent-fg-color: #d97757;
+  --md-primary-fg-color: #faf9f5;
+  --md-primary-bg-color: #1a1915;
+  --md-code-bg-color: #f1efe9;
+  --md-footer-bg-color: #f1efe9;
+  --md-footer-fg-color: #5e5d59;
+  --md-footer-bg-color--dark: #f1efe9;
+  --md-footer-fg-color--light: #5e5d59;
+}
+
+/* dark: soft charcoal, not pure black. slate derives most surface and
+   border colors from --md-hue (default ~232, blueish) — warm it to match */
+[data-md-color-scheme='slate'] {
+  --md-hue: 40;
+  --md-default-bg-color: #1f1e1b;
+  --md-default-fg-color: #e8e6df;
+  --md-typeset-a-color: #e08b68;
+  --md-accent-fg-color: #e08b68;
+  --md-primary-fg-color: #1f1e1b;
+  --md-primary-bg-color: #e8e6df;
+  --md-code-bg-color: #2a2925;
+  --md-footer-bg-color: #1a1917;
+  --md-footer-bg-color--dark: #1a1917;
+}
+
+/* flat header, blended with the page background in both schemes */
+.md-header {
+  background-color: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  box-shadow: none;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* theme-matched logo: swap in the dark-ink/light-ink variant per scheme */
+[data-md-color-scheme='slate'] .md-logo img {
+  content: url('../assets/logo-dark.svg');
+}
+
+/* stock repo button as a plain 'source' text link (repo_name: source) */
+.md-header .md-header__source {
+  display: block;
+  width: auto;
+  max-width: none;
+}
+.md-header__source .md-source__icon,
+.md-header__source .md-source__facts {
+  display: none;
+}
+.md-header__source .md-source__icon + .md-source__repository {
+  margin-left: 0;
+  padding-left: 0;
+  max-width: none;
+  font-size: 0.7rem;
+  color: var(--md-default-fg-color--light);
+}
+.md-source:hover {
+  opacity: 1;
+}
+.md-source:hover .md-source__repository {
+  color: var(--md-accent-fg-color);
+}
+
+/* header inner is a flex row: order the palette toggle and search after
+   the source link so 'source' sits left of the toggle */
+.md-header__option,
+.md-header label[for='__search'],
+.md-search {
+  order: 1;
+}
+
+/* smaller light/dark toggle icon */
+[data-md-component='palette'] .md-header__button svg {
+  height: 0.95rem;
+  width: 0.95rem;
+}
+
+/* comfortable prose measure */
+.md-typeset {
+  line-height: 1.7;
+}
+@media screen and (min-width: 76.25em) {
+  .md-content__inner {
+    max-width: 46rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+/* quiet, spaced sidebar section labels */
+.md-nav__item--section > .md-nav__link {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--md-default-fg-color--light);
+}
+
+/* rounded, bordered code blocks */
+.md-typeset pre > code {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.4rem;
+  font-size: 0.72rem;
+}
+.md-typeset code {
+  border-radius: 0.2rem;
+}
+
+/* slightly quieter headings */
+.md-typeset h1 {
+  font-weight: 600;
+  color: var(--md-default-fg-color);
+}
+.md-typeset h2 {
+  font-weight: 600;
+}
+
+/* mkdocstrings: give API entries breathing room */
+.md-typeset .doc-object {
+  margin-bottom: 2.5em;
+}
+
+/* definition-line headings: plain monospace, not inline-code chips */
+.md-typeset .doc-heading code {
+  background: none;
+  padding: 0;
+}
+
+/* definition lines are compact, not display headings */
+.md-typeset h2.doc-heading {
+  font-size: 1rem;
+  margin: 0 0 0.8em;
+}
+.md-typeset h3.doc-heading {
+  font-size: 0.85rem;
+}
+
+/* bold, accented object name in definition lines: every token before the
+   first parenthesis is part of the dotted name */
+.md-typeset .doc-heading code.highlight > span {
+  color: var(--md-typeset-a-color);
+  font-weight: 700;
+}
+.md-typeset .doc-heading code.highlight > span.p,
+.md-typeset .doc-heading code.highlight > span.p ~ span {
+  color: var(--md-default-fg-color);
+  font-weight: 400;
+}
+
+/* indent the documentation body under each object, including top-level
+   functions (matched via their heading badge), but not class roots */
+.md-typeset .doc-contents:not(.first),
+.md-typeset .doc-heading:has(code.doc-symbol-function) + .doc-contents.first {
+  padding-left: 1.2em;
+  border-left: 2px solid var(--md-default-fg-color--lightest);
+}
+
+/* hide heading badges for members; keep them for classes and modules */
+.md-typeset code.doc-symbol-heading.doc-symbol-method,
+.md-typeset code.doc-symbol-heading.doc-symbol-function,
+.md-typeset code.doc-symbol-heading.doc-symbol-attribute {
+  display: none;
+}
+
+/* neutral symbol chips: light gray text on a lighter gray background
+   (!important since the mkdocstrings stylesheet loads after this one) */
+code.doc-symbol {
+  color: var(--md-default-fg-color--light) !important;
+  background-color: var(--md-default-fg-color--lightest) !important;
+}
+
+/* in the page body, chips are plain text with no highlight at all */
+code.doc-symbol-heading {
+  background: none !important;
+  padding-left: 0;
+}
+
+/* full-word symbol labels */
+code.doc-symbol.doc-symbol-method::after {
+  content: 'method';
+}
+code.doc-symbol.doc-symbol-function::after {
+  content: 'function';
+}
+code.doc-symbol.doc-symbol-attribute::after {
+  content: 'attribute';
+}
+code.doc-symbol.doc-symbol-class::after {
+  content: 'class';
+}
+code.doc-symbol.doc-symbol-module::after {
+  content: 'module';
+}
