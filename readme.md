@@ -10,7 +10,7 @@ pip install voxel
 
 ### Documentation
 
-Guides and the full API reference live in the [voxel documentation](DOCS-URL). Pull requests and bug reports are welcome.
+Guides and the full API reference live in the [voxel documentation](https://ahoopes.github.io/voxel/). Pull requests and bug reports are welcome.
 
 ### Citation
 
