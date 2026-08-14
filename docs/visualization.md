@@ -1,3 +1,7 @@
+---
+description: Visualize 3D medical images, segmentations, and meshes in Python — an interactive browser-based viewer plus 2D snapshot rendering for quick checks and figures.
+---
+
 # Visualization
 
 Voxel ships with *Monocle*, an interactive browser viewer for volumes, segmentations, and meshes, along with utilities that render 2D snapshot images for quick checks, experimental logging, or figure rendering.

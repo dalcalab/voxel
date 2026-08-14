@@ -1,3 +1,7 @@
+---
+description: Apply affine matrices and dense nonlinear deformations to medical images, meshes, and 3D coordinates in PyTorch — differentiable spatial transforms for image registration.
+---
+
 # Transforms
 
 Voxel provides representations for both linear (or affine) matrix transforms and nonlinear (or dense) deformations. By convention they act on world coordinates, and they apply uniformly to volumes, meshes, bounding boxes, and bare 3D coordinate points.

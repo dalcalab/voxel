@@ -1,3 +1,7 @@
+---
+description: GPU-compatible, differentiable triangular mesh processing in PyTorch — anatomical surfaces in world coordinates that transform and align with 3D medical images.
+---
+
 # Meshes
 
 A [`Mesh`](reference/classes/mesh.md) is a triangular surface, a $(V, 3)$ vertex tensor and an $(F, 3)$ face-index tensor living in world coordinates. Like volumes, meshes are GPU-compatible and differentiable through their vertex data.

@@ -1,3 +1,7 @@
+---
+description: Full API reference for the voxel Python package — Volume, Mesh, transform, and label classes plus functions for medical image I/O, resampling, filtering, and morphology.
+---
+
 # API Reference
 
 Voxel is conventionally imported as:

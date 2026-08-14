@@ -7,6 +7,9 @@ copyright: Copyright &copy; Andrew Hoopes
 
 extra:
   generator: false
+  analytics:
+    provider: google
+    property: G-QDT3X14ECB
 
 theme:
   name: material

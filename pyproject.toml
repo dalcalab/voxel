@@ -24,6 +24,11 @@ dependencies = [
 [project.optional-dependencies]
 test = ['pytest', 'nibabel', 'scipy']
 
+[project.urls]
+Homepage = 'https://ahoopes.github.io/voxel/'
+Documentation = 'https://ahoopes.github.io/voxel/'
+Repository = 'https://github.com/dalcalab/voxel'
+
 [build-system]
 requires = ['setuptools']
 build-backend = 'setuptools.build_meta'

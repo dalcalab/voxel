@@ -1,3 +1,7 @@
+---
+description: Load, resample, crop, and reorient 3D medical images (MRI, CT, NIfTI) as PyTorch tensors, with acquisition geometry that keeps every voxel anchored in world coordinates.
+---
+
 # Volumes & Geometry
 
 A [`Volume`](reference/classes/volume.md) is the core representation of volumetric imaging data, such as MR and CT images. It pairs a multi-channel 3D image tensor with an [`AcquisitionGeometry`](reference/classes/acquisition-geometry.md) that anchors the voxel grid in world coordinates, the physical space of the scanner. As operations like resampling, reshaping, and cropping are applied to a volume, the geometry is updated in step, so the image always stays correctly placed in world space.

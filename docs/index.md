@@ -1,3 +1,7 @@
+---
+description: Voxel is an open-source PyTorch framework for volumetric medical imaging, with GPU-accelerated, differentiable tools for MRI and CT volumes, resampling, registration, segmentation, meshes, and medical image I/O.
+---
+
 # Voxel
 
 Voxel is a broad framework for hardware-accelerated volumetric medical imaging, centered on image and mesh data structures *and their relationship to a world coordinate system*. It is built on PyTorch, so data manipulations run on the GPU and support automatic differentiation, making it well-suited for rapid algorithm development, learning-based pipelines, or simply fast inspection of imaging data in Python.

@@ -1,3 +1,7 @@
+---
+description: Work with segmentation label maps in PyTorch — lookup tables that pair label values with names and display colors and follow the volume through its operations.
+---
+
 # Label Maps
 
 Label maps, or segmentations, are volumes of integer label values. A [`LabelLookup`](reference/classes/label-lookup.md) annotates those values with names and display colors and travels with the volume through its operations.
