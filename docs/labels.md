@@ -84,6 +84,6 @@ labels.save('labels.csv')
 labels = vx.load_labels('labels.csv')
 ```
 
-When a volume with labels is saved to NIfTI, the lookup is embedded directly in the file. It is serialized as a small JSON block, a `vxlabels` list of index, name, and hex color entries, stored in a header comment extension, and the header intent code is set to `label`. On load, any header extension holding such a block is parsed back into the volume's lookup, so the annotation survives a round trip. MGH files embed the lookup through the format's native lookup support, which requires a color for every entry (black is assigned to labels without one). The torch volume format does not store labels.
+When a volume with labels is saved to NIfTI, the lookup is embedded directly in the file. It is serialized as a small JSON block, a `labels` list of index, name, and hex color entries, stored in a header comment extension, and the header intent code is set to `label`. On load, any header extension holding such a block is parsed back into the volume's lookup, so the annotation survives a round trip. MGH files embed the lookup through the format's native lookup support, which requires a color for every entry (black is assigned to labels without one). The torch volume format does not store labels.
 
 For rendering colored segmentation overlays, see [Visualization](visualization.md).

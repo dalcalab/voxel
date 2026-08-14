@@ -118,12 +118,12 @@ class NiftiArrayIO(IOProtocol):
             if label.color is not None:
                 entry['color'] = self._color_to_hex(label.color)
             entries.append(entry)
-        return json.dumps({'vxlabels': entries})
+        return json.dumps({'labels': entries})
 
     def _labels_from_json(self, text: str | bytes) -> vx.LabelLookup | None:
         """
         Parse a label lookup table from a JSON string, returning None if the text
-        is not a recognized `vxlabels` block.
+        is not a recognized `labels` block.
         """
         if isinstance(text, bytes):
             try:
@@ -134,15 +134,18 @@ class NiftiArrayIO(IOProtocol):
             data = json.loads(text)
         except (ValueError, TypeError):
             return None
-        if not isinstance(data, dict) or 'vxlabels' not in data:
+        if not isinstance(data, dict) or 'labels' not in data:
             return None
 
         lookup = vx.LabelLookup()
-        for entry in data['vxlabels']:
-            color = entry.get('color')
-            if color is not None:
-                color = self._color_from_hex(color)
-            lookup[int(entry['index'])] = vx.Label(entry['name'], color)
+        try:
+            for entry in data['labels']:
+                color = entry.get('color')
+                if color is not None:
+                    color = self._color_from_hex(color)
+                lookup[int(entry['index'])] = vx.Label(entry['name'], color)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return None
         return lookup
 
     def load(self, filename: os.PathLike) -> vx.Volume:
