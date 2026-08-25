@@ -13,17 +13,9 @@ import voxel as vx
 from .utility import IOProtocol
 
 
-def load_volume(filename: os.PathLike, fmt: str | None = None) -> vx.Volume:
+def _find_read_protocol(filename: os.PathLike, fmt: str | None) -> type:
     """
-    Load a volume from a file.
-
-    Args:
-        filename (PathLike): The path to the file to load.
-        fmt (str, optional): The format of the file. If None, the format is
-            determined by the file extension.
-
-    Returns:
-        Volume: The loaded volume.
+    Resolve a volume IO protocol class for reading, by format name or file extension.
     """
     vx.io.utility.check_file_readability(filename)
 
@@ -36,7 +28,38 @@ def load_volume(filename: os.PathLike, fmt: str | None = None) -> vx.Volume:
         if proto is None:
             raise ValueError(f'unknown file format {fmt}')
 
-    return proto().load(filename)
+    return proto
+
+
+def load_volume(filename: os.PathLike, fmt: str | None = None) -> vx.Volume:
+    """
+    Load a volume from a file.
+
+    Args:
+        filename (PathLike): The path to the file to load.
+        fmt (str, optional): The format of the file. If None, the format is
+            determined by the file extension.
+
+    Returns:
+        Volume: The loaded volume.
+    """
+    return _find_read_protocol(filename, fmt)().load(filename)
+
+
+def load_geometry(filename: os.PathLike, fmt: str | None = None) -> vx.AcquisitionGeometry:
+    """
+    Load only the acquisition geometry from a volume file, without reading
+    voxel data into memory. Supported for nifti and nrrd files.
+
+    Args:
+        filename (PathLike): The path to the file to load.
+        fmt (str, optional): The format of the file. If None, the format is
+            determined by the file extension.
+
+    Returns:
+        AcquisitionGeometry: The loaded geometry.
+    """
+    return _find_read_protocol(filename, fmt)().load_geometry(filename)
 
 
 def save_volume(volume: vx.Volume, filename: os.PathLike, fmt: str | None = None) -> None:
@@ -148,6 +171,53 @@ class NiftiArrayIO(IOProtocol):
             return None
         return lookup
 
+    def _geometry_from_nifti(self, nii) -> vx.AcquisitionGeometry:
+        """
+        Build an acquisition geometry from a loaded nibabel image, reconciling
+        explicit header spacing with the affine and caching the header reference.
+        Only reads header information, never voxel data.
+
+        Args:
+            nii (Nifti1Image): The nibabel image to extract geometry from.
+
+        Returns:
+            AcquisitionGeometry: The extracted geometry.
+        """
+        baseshape = tuple(int(d) for d in nii.header['dim'][1:4])
+        geometry = vx.AcquisitionGeometry(baseshape, torch.from_numpy(nii.affine))
+
+        #
+        spacing = torch.from_numpy(nii.header['pixdim'][1:4])
+        if not torch.allclose(geometry.spacing, spacing, atol=0.01, rtol=0.2):
+
+            explicit_spacing = ', '.join([f'{s:.2f}' for s in spacing])
+            affine_spacing = ', '.join([f'{s:.2f}' for s in geometry.spacing])
+            warning = f'warning: explicit voxel spacing in the nifti header ({explicit_spacing}) ' \
+                      f'does not match scanner affine spacing ({affine_spacing})'
+
+            if torch.allclose(geometry.tensor.abs(), torch.eye(4), atol=1e-5):
+                geometry = geometry.scale(spacing, space='world')
+                warning = f'{warning} - overwriting with explicit spacing'
+
+            print(warning)
+
+        #
+        geometry.reference['nii'] = NiftiHeaderReference(nii)
+        return geometry
+
+    def load_geometry(self, filename: os.PathLike) -> vx.AcquisitionGeometry:
+        """
+        Read only the acquisition geometry from a Nifti file header, without
+        loading voxel data.
+
+        Args:
+            filename (PathLike): The path to the Nifti file to read.
+
+        Returns:
+            AcquisitionGeometry: The loaded geometry.
+        """
+        return self._geometry_from_nifti(self.nib.load(filename))
+
     def load(self, filename: os.PathLike) -> vx.Volume:
         """
         Read array from a Nifti file.
@@ -169,27 +239,8 @@ class NiftiArrayIO(IOProtocol):
         if features.ndim == 4:
             features = features.moveaxis(-1, 0)
 
-        # 
-        spacing = torch.from_numpy(nii.header['pixdim'][1:4])
-        affine = torch.from_numpy(nii.affine)
-        volume = vx.Volume(features, affine)
-
-        # 
-        if not torch.allclose(volume.geometry.spacing, spacing, atol=0.01, rtol=0.2):
-
-            explicit_spacing = ', '.join([f'{s:.2f}' for s in spacing])
-            affine_spacing = ', '.join([f'{s:.2f}' for s in volume.geometry.spacing])
-            warning = f'warning: explicit voxel spacing in the nifti header ({explicit_spacing}) ' \
-                      f'does not match scanner affine spacing ({affine_spacing})'
-
-            if torch.allclose(volume.geometry.tensor.abs(), torch.eye(4), atol=1e-5):
-                volume = vx.Volume(features, volume.geometry.scale(spacing, space='world'))
-                warning = f'{warning} - overwriting with explicit spacing'
-
-            print(warning)
-
         #
-        volume.geometry.reference['nii'] = NiftiHeaderReference(nii)
+        volume = vx.Volume(features, self._geometry_from_nifti(nii))
 
         # read an embedded label lookup table, if present
         for ext in nii.header.extensions:
@@ -401,28 +452,22 @@ class NrrdArrayIO(IOProtocol):
             raise ImportError('the `pynrrd` python package must be installed for nrrd volume IO')
         self.nrrd = nrrd
 
-    def load(self, filename: os.PathLike) -> vx.Volume:
+    def _geometry_from_header(self, header) -> vx.AcquisitionGeometry:
         """
-        Read array from a nrrd file.
+        Build an acquisition geometry from a parsed nrrd header dictionary,
+        validating that it describes a supported 3D spatial volume.
 
         Args:
-            filename (PathLike): The path to the nrrd file to read.
+            header (dict): The parsed nrrd header.
 
         Returns:
-            Volume: The loaded volume.
+            AcquisitionGeometry: The extracted geometry.
         """
-        array, header = self.nrrd.read(str(filename))
-
-        kinds = header.get('kinds', ['domain'] * array.ndim)
-        if array.ndim != 3 or any(k not in ('domain', 'space') for k in kinds):
+        baseshape = tuple(int(s) for s in header['sizes'])
+        kinds = header.get('kinds', ['domain'] * len(baseshape))
+        if len(baseshape) != 3 or any(k not in ('domain', 'space') for k in kinds):
             raise ValueError(f'only 3D spatial nrrd volumes are supported, '
-                             f'got shape {array.shape} with kinds {kinds}')
-
-        # not supported by torch
-        if array.dtype in (np.uint16, np.uint32):
-            array = array.astype(np.int32)
-
-        features = vx.io.utility.numpy_to_tensor(array)
+                             f'got shape {baseshape} with kinds {kinds}')
 
         # nrrd stores per-axis direction vectors as rows, which correspond
         # to the columns of a voxel-to-world affine
@@ -445,7 +490,39 @@ class NrrdArrayIO(IOProtocol):
             if c in 'lpi':
                 affine[i] *= -1
 
-        return vx.Volume(features, torch.from_numpy(affine))
+        return vx.AcquisitionGeometry(baseshape, torch.from_numpy(affine))
+
+    def load_geometry(self, filename: os.PathLike) -> vx.AcquisitionGeometry:
+        """
+        Read only the acquisition geometry from a nrrd file header, without
+        loading voxel data.
+
+        Args:
+            filename (PathLike): The path to the nrrd file to read.
+
+        Returns:
+            AcquisitionGeometry: The loaded geometry.
+        """
+        return self._geometry_from_header(self.nrrd.read_header(str(filename)))
+
+    def load(self, filename: os.PathLike) -> vx.Volume:
+        """
+        Read array from a nrrd file.
+
+        Args:
+            filename (PathLike): The path to the nrrd file to read.
+
+        Returns:
+            Volume: The loaded volume.
+        """
+        array, header = self.nrrd.read(str(filename))
+        geometry = self._geometry_from_header(header)
+
+        # not supported by torch
+        if array.dtype in (np.uint16, np.uint32):
+            array = array.astype(np.int32)
+
+        return vx.Volume(vx.io.utility.numpy_to_tensor(array), geometry)
 
 
 # enabled volume IO protocol classes

@@ -48,6 +48,7 @@ from .snapshots import snapshot
 from . import io
 from .io.volume import load_volume
 from .io.volume import save_volume
+from .io.volume import load_geometry
 from .io.mesh import load_mesh
 from .io.mesh import save_mesh
 from .io.affine import load_affine

@@ -81,6 +81,20 @@ class IOProtocol:
         """
         raise NotImplementedError(f'reading file format of {os.path.basename(filename)} is not implemented yet')
 
+    def load_geometry(self, filename: os.PathLike) -> object:
+        """
+        Geometry-only load function to be implemented by subclasses that support
+        reading acquisition geometry without loading voxel data.
+
+        Args:
+            filename (PathLike): The filename to load geometry from.
+
+        Raises:
+            NotImplementedError: If the subclass does not implement this method.
+        """
+        raise NotImplementedError(f'geometry-only loading is not supported for '
+                                  f'the file format of {os.path.basename(filename)}')
+
     def save(self, obj: object, filename: os.PathLike) -> None:
         """
         File save function to be implemented for each subclass.

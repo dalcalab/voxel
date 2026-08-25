@@ -2,6 +2,8 @@
 
 ::: voxel.save_volume
 
+::: voxel.load_geometry
+
 ::: voxel.load_mesh
 
 ::: voxel.save_mesh
