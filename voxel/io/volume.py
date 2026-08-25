@@ -387,9 +387,71 @@ class PytorchVolumeIO(IOProtocol):
         torch.save({'v': features, 'm': matrix}, filename)
 
 
+class NrrdArrayIO(IOProtocol):
+    """
+    Array IO protocol for nrrd files. Load-only, limited to 3D spatial volumes.
+    """
+    name = 'nrrd'
+    extensions = ('.nrrd', '.nhdr')
+
+    def __init__(self) -> None:
+        try:
+            import nrrd
+        except ImportError:
+            raise ImportError('the `pynrrd` python package must be installed for nrrd volume IO')
+        self.nrrd = nrrd
+
+    def load(self, filename: os.PathLike) -> vx.Volume:
+        """
+        Read array from a nrrd file.
+
+        Args:
+            filename (PathLike): The path to the nrrd file to read.
+
+        Returns:
+            Volume: The loaded volume.
+        """
+        array, header = self.nrrd.read(str(filename))
+
+        kinds = header.get('kinds', ['domain'] * array.ndim)
+        if array.ndim != 3 or any(k not in ('domain', 'space') for k in kinds):
+            raise ValueError(f'only 3D spatial nrrd volumes are supported, '
+                             f'got shape {array.shape} with kinds {kinds}')
+
+        # not supported by torch
+        if array.dtype in (np.uint16, np.uint32):
+            array = array.astype(np.int32)
+
+        features = vx.io.utility.numpy_to_tensor(array)
+
+        # nrrd stores per-axis direction vectors as rows, which correspond
+        # to the columns of a voxel-to-world affine
+        directions = np.asarray(header['space directions'], dtype=np.float64)
+        origin = np.asarray(header.get('space origin', np.zeros(3)), dtype=np.float64)
+
+        affine = np.eye(4)
+        affine[:3, :3] = directions.T
+        affine[:3, 3] = origin
+
+        # convert the anatomical space to the RAS world convention by
+        # negating any world axis with flipped polarity (e.g. LPS)
+        space = header.get('space', '').lower()
+        words = space.split('-')
+        code = ''.join(w[0] for w in words) if len(words) == 3 else space
+        if len(code) != 3 or any(c not in pair for c, pair in zip(code, ('rl', 'ap', 'si'))):
+            raise ValueError(f'unsupported nrrd space \'{header.get("space")}\', '
+                             'expected an anatomical space like RAS or LPS')
+        for i, c in enumerate(code):
+            if c in 'lpi':
+                affine[i] *= -1
+
+        return vx.Volume(features, torch.from_numpy(affine))
+
+
 # enabled volume IO protocol classes
 volume_io_protocols = [
     NiftiArrayIO,
     MghArrayIO,
     PytorchVolumeIO,
+    NrrdArrayIO,
 ]

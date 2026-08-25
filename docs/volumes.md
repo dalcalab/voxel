@@ -170,4 +170,4 @@ vol = vx.load_volume('image.nii.gz')
 vol.save('image.nii.gz')              # or vx.save_volume(vol, ...)
 ```
 
-I/O backend libraries are imported lazily, so voxel only requires them when a format needs one. NIfTI files (`.nii`, `.nii.gz`) are read through [nibabel](https://nipy.org/nibabel/), and MGH files (`.mgz`, `.mgh`) through [surfa](https://github.com/freesurfer/surfa). NIfTI and MGH loads keep a reference to the original header, so a load and save round trip preserves it without floating-point drift in the affine.
+I/O backend libraries are imported lazily, so voxel only requires them when a format needs one. NIfTI files (`.nii`, `.nii.gz`) are read through [nibabel](https://nipy.org/nibabel/), MGH files (`.mgz`, `.mgh`) through [surfa](https://github.com/freesurfer/surfa), and NRRD files (`.nrrd`, `.nhdr`) through [pynrrd](https://github.com/mhe/pynrrd), currently load-only. NIfTI and MGH loads keep a reference to the original header, so a load and save round trip preserves it without floating-point drift in the affine.
