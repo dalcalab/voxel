@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
+import functools
 import os
 import warnings
 import torch
@@ -46,7 +47,7 @@ class AffineMatrix:
             data = torch.cat((data, row), dim=1)
 
         if data.shape == (3, 4):
-            row = torch.tensor([[0, 0, 0, 1]], dtype=data.dtype, device=data.device)
+            row = _bottom_row(data.dtype, data.device)
             data = torch.cat((data, row), dim=0)
         elif data.shape != (4, 4):
             raise ValueError('Input matrix must be 3x3, 3x4, or 4x4.')
@@ -179,6 +180,14 @@ class AffineMatrix:
         return self.map(coords)
 
 
+@functools.lru_cache
+def _bottom_row(dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    # the homogeneous [0, 0, 0, 1] row as a device-resident constant. building it per call
+    # is a host-to-device copy that syncs the stream and cannot be captured in a cuda graph,
+    # and hot optimization loops assemble matrices every iteration
+    return torch.tensor([[0, 0, 0, 1]], dtype=dtype, device=device)
+
+
 def translation_matrix(translation: torch.Tensor) -> AffineMatrix:
     """
     Compute a 3D translation matrix from translation vector.
@@ -201,12 +210,8 @@ def angles_to_rotation_matrix(
     degrees: bool = True,
     dtype: torch.dtype = torch.float32) -> AffineMatrix:
     """
-    Compute a 3D rotation matrix from rotation angles.
-
-    Angles follow the standard right-handed convention (a positive rotation
-    about x carries +y toward +z) and are composed as `Rx @ Ry @ Rz`,
-    i.e. intrinsic x-y-z order, consistent with
-    `quaternion_to_rotation_matrix` and scipy's `Rotation.from_euler('XYZ')`.
+    Compute a 3D rotation matrix from rotation angles, following the standard
+    right-handed convention.
 
     Args:
         rotation (Tensor): Rotation angles (x, y, z). If `degrees` is True, the
@@ -326,7 +331,7 @@ def compose_affine(
 
     zero = torch.zeros((), dtype=torch.float64, device=device)
     one = torch.ones((), dtype=torch.float64, device=device)
-    bottom = torch.tensor([[0, 0, 0, 1]], dtype=torch.float64, device=device)
+    bottom = _bottom_row(torch.float64, device)
 
     def homogeneous(linear: torch.Tensor, trans: torch.Tensor) -> torch.Tensor:
         # assemble a 4x4 matrix from a 3x3 linear block and a translation vector

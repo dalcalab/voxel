@@ -4,6 +4,7 @@ Dense deformation structures for warping volumes and integrating flow fields.
 
 from __future__ import annotations
 
+import dataclasses
 import torch
 import voxel as vx
 
@@ -85,17 +86,25 @@ class VectorField(vx.Volume):
         vectors = torch.einsum('ij,jwhd->iwhd', linear, self.tensor.to(dtype))
         return VectorField(vectors, self.geometry, space=space)
 
-    def as_warp(self) -> Warp:
+    def as_warp(self, geometry: vx.AcquisitionGeometry = None) -> Warp:
         """
         Convert to an absolute world-space coordinate warp, built as the
         identity grid displaced by the world-space vectors.
 
+        Args:
+            geometry (AcquisitionGeometry, optional): Grid to express the warp
+                on. Displacements are sampled there and vanish beyond the
+                field's extent. Defaults to the field's own grid.
+
         Returns:
             Warp: The corresponding coordinate warp.
         """
-        vectors = self.in_space('world').tensor.permute(1, 2, 3, 0)
-        grid = self.geometry.map(vx.volume.volume_grid(self.baseshape, device=self.device))
-        return Warp(grid + vectors, self.geometry)
+        field = self.in_space('world')
+        if geometry is None:
+            grid = self.geometry.map(vx.volume.volume_grid(self.baseshape, device=self.device))
+            return Warp(grid + field.tensor.permute(1, 2, 3, 0), self.geometry)
+        grid = geometry.map(vx.volume.volume_grid(geometry.baseshape, device=self.device))
+        return Warp(grid + field.sample(grid, space='world'), geometry)
 
     def integrate(self, coordinates: torch.Tensor, dt: float, method: str = 'euler',
                   time: float = 1, space: vx.Space = None,
@@ -218,6 +227,12 @@ class Warp:
         """
         return self.coordinates.device
 
+    def to(self, device: torch.device) -> Warp:
+        """
+        Move the warp coordinates to a device.
+        """
+        return Warp(self.coordinates.to(device), self.geometry)
+
     def as_volume(self) -> vx.Volume:
         """
         Convert the warp to a volume of 3-channel coordinate features.
@@ -256,43 +271,17 @@ class Warp:
         return vx.Volume(sampled.permute(3, 0, 1, 2), self.geometry)
 
 
-def compose_transforms(*transforms: vx.AffineMatrix | Warp) -> vx.AffineMatrix | Warp:
+@dataclasses.dataclass(frozen=True)
+class VectorFieldPair:
     """
-    Merge a sequence of transforms into a single equivalent transform, where
-    the argument order is the order in which the transforms are applied to a
-    volume. Affine matrices are assumed to be world-space transforms. Points
-    that a warp maps beyond the extent of a preceding warp see zero
-    displacement from it.
-
-    Args:
-        *transforms (AffineMatrix or Warp): Transforms to merge.
-
-    Returns:
-        AffineMatrix or Warp: The merged transform, an affine matrix when all
-            inputs are affine and a warp otherwise.
+    Forward and reverse displacement fields of one deformation, e.g. from a symmetric
+    registration. The pair is what makes a deformation invertible in a `TransformSeries`.
     """
-    if not transforms:
-        raise ValueError('expected at least one transform to compose')
-    affine = None
-    warp = None
-    for transform in transforms:
-        if isinstance(transform, Warp):
-            coordinates = transform.coordinates
-            if warp is not None:
-                # pull the running warp back through the next one by sampling
-                # its displacement field at the new mapping coordinates
-                displacement = warp.as_displacement_field()
-                coordinates = coordinates + displacement.sample(coordinates, space='world')
-            elif affine is not None:
-                coordinates = affine.inverse().map(coordinates)
-            warp = Warp(coordinates, transform.geometry)
-        elif isinstance(transform, vx.AffineMatrix):
-            if warp is not None:
-                # an affine after a warp only moves the output domain
-                geometry = vx.AcquisitionGeometry(warp.baseshape, transform @ warp.geometry)
-                warp = Warp(warp.coordinates, geometry)
-            else:
-                affine = transform if affine is None else transform @ affine
-        else:
-            raise TypeError(f'cannot compose transform of type {type(transform).__name__}')
-    return affine if warp is None else warp
+    forward: VectorField
+    reverse: VectorField
+
+    def inverse(self) -> VectorFieldPair:
+        return VectorFieldPair(self.reverse, self.forward)
+
+    def to(self, device: torch.device) -> VectorFieldPair:
+        return VectorFieldPair(self.forward.to(device), self.reverse.to(device))

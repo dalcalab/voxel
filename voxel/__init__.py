@@ -36,7 +36,11 @@ from .volume import volumes_equal
 from . import warp
 from .warp import Warp
 from .warp import VectorField
-from .warp import compose_transforms
+from .warp import VectorFieldPair
+
+from . import transform
+from .transform import TransformSeries
+from .transform import AnyTransform
 
 from . import mesh
 from .mesh import Mesh

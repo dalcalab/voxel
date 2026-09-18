@@ -197,16 +197,22 @@ def _filter_tensor(
     result = tensor.float().unsqueeze(0)
     channels = tensor.shape[0]
 
+    # odd kernels with zero padding can be padded by the convolution itself, which
+    # avoids materializing a padded copy of the input (a noticeable cost in hot loops)
+    conv_pads = [0, 0, 0]
     if padding == 'same':
-        mode = 'constant' if padding_mode == 'zeros' else padding_mode
-        result = torch.nn.functional.pad(result, _compute_padding(kernel_size), mode=mode)
+        if padding_mode == 'zeros' and all(int(k) % 2 == 1 for k in kernel_size):
+            conv_pads = [(int(k) - 1) // 2 for k in kernel_size]
+        else:
+            mode = 'constant' if padding_mode == 'zeros' else padding_mode
+            result = torch.nn.functional.pad(result, _compute_padding(kernel_size), mode=mode)
     elif padding != 'valid':
         raise ValueError(f"padding must be 'same' or 'valid', got '{padding}'")
 
     conv = torch.nn.functional.conv3d
     if len(kernels) == 1:
         weight = kernels[0].to(result.dtype).view(1, 1, *kernel_size).expand(channels, 1, *kernel_size)
-        result = conv(result, weight, groups=channels, stride=stride)
+        result = conv(result, weight, groups=channels, stride=stride, padding=conv_pads)
     else:
         for dim, k in enumerate(kernels):
             # a single-element unit kernel with no stride is an identity
@@ -215,7 +221,8 @@ def _filter_tensor(
             shape = [k.numel() if d == dim else 1 for d in range(3)]
             weight = k.to(result.dtype).view(1, 1, *shape).expand(channels, 1, *shape)
             dim_stride = [stride[d] if d == dim else 1 for d in range(3)]
-            result = conv(result, weight, groups=channels, stride=dim_stride)
+            dim_pad = [conv_pads[d] if d == dim else 0 for d in range(3)]
+            result = conv(result, weight, groups=channels, stride=dim_stride, padding=dim_pad)
 
     return result.squeeze(0)
 

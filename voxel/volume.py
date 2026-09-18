@@ -1437,55 +1437,45 @@ class Volume:
         return self.pad(-delta, space=space)
 
     def transform(self,
-        transform: vx.AffineMatrix | vx.warp.Warp,
-        resample: bool = None,
+        transform: vx.AnyTransform,
         mode: str = 'linear',
         padding_mode: str = 'zeros') -> Volume:
         """
-        Apply a spatial transform to the volume. Affine matrices are assumed to
-        be world-space transforms. By default an affine only moves the world
-        geometry without touching the image data, while a warp always resamples
-        and pins the result to the warp grid domain.
+        Apply a spatial transform to the volume. Affine matrices are world-space
+        transforms and only move the acquisition geometry, never the image data
+        (resample afterwards, e.g. with `resample_like`, if a fixed grid is
+        needed). Warps resample the data and pin the result to the warp grid. A
+        displacement field (or the forward field of a pair) is applied as a warp
+        on this volume's own grid, so the result keeps its geometry (the field
+        is sampled there, with zero displacement beyond its extent). A transform
+        series is applied step by step, in order, with no composition.
 
         Args:
-            transform (AffineMatrix or Warp): Transform to apply.
-            resample (bool, optional): If True, the image data is resampled on
-                its grid. If None, resampling defaults to False for affine
-                inputs and True for warps. Cannot be False for warps.
-            mode (str, optional): Interpolation mode if resampling.
+            transform (AnyTransform): Transform to apply.
+            mode (str, optional): Interpolation mode when resampling through a warp.
             padding_mode (str, optional): Padding mode for outside grid values
-                if resampling.
+                when resampling through a warp.
 
         Returns:
             Volume: Transformed volume.
         """
-        if isinstance(transform, vx.warp.Warp):
-            if resample is not None and not resample:
-                raise ValueError('cannot apply a warp without resampling')
+        if isinstance(transform, vx.TransformSeries):
+            volume = self
+            for step in transform:
+                volume = volume.transform(step, mode=mode, padding_mode=padding_mode)
+            return volume
+
+        if isinstance(transform, vx.VectorFieldPair):
+            transform = transform.forward
+        if isinstance(transform, vx.VectorField):
+            # sampled on this volume's own grid, so the result keeps its geometry
+            transform = transform.as_warp(self.geometry)
+        if isinstance(transform, vx.Warp):
             return transform.map(self, mode=mode, padding_mode=padding_mode)
 
         if not isinstance(transform, vx.AffineMatrix):
             transform = vx.AffineMatrix(transform)
-
-        if not resample:
-            # just apply the transform to the acquisition geometry
-            return self.new(self.tensor, transform @ self.geometry)
-
-        # resample on the current grid with a voxel-to-voxel pull-back map
-        matrix = self.geometry.inverse() @ transform.inverse() @ self.geometry
-        grid = volume_grid(self.baseshape, transform=matrix,
-                           localshape=self.baseshape, device=self.device)
-
-        # ensure a floating-point dtype without downcasting higher precision
-        tensor = self.tensor if self.tensor.is_floating_point() else self.tensor.float()
-        interpolated = torch.nn.functional.grid_sample(
-                        tensor.unsqueeze(0),
-                        grid.unsqueeze(0).to(tensor.dtype),
-                        mode=('bilinear' if mode == 'linear' else mode),
-                        padding_mode=padding_mode,
-                        align_corners=False).squeeze(0)
-
-        return self.new(interpolated, self.geometry)
+        return self.new(self.tensor, transform @ self.geometry)
 
     def pool(self,
         scale: int = 2,
