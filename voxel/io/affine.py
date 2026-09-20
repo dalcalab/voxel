@@ -75,6 +75,38 @@ class PytorchMatrixIO(IOProtocol):
         torch.save(affine.tensor.detach().cpu(), filename)
 
 
+class TextMatrixIO(IOProtocol):
+    """
+    IO protocol for storing an affine matrix as plain whitespace-delimited text.
+
+    The file holds four rows of four numbers (or three rows, in which case the
+    homogeneous bottom row is assumed). Lines beginning with `#` are ignored.
+    This matches the layout used by FSL `.mat` files and `numpy.savetxt`.
+    """
+    name = 'text'
+    extensions = ('.txt', '.mat')
+
+    def load(self, filename: os.PathLike) -> vx.AffineMatrix:
+        rows = []
+        with open(filename) as f:
+            for line in f:
+                line = line.split('#', 1)[0].strip()
+                if line:
+                    rows.append([float(x) for x in line.replace(',', ' ').split()])
+        if len(rows) not in (3, 4) or any(len(r) != 4 for r in rows):
+            raise ValueError(f'expected a 3x4 or 4x4 matrix in {filename}, '
+                             f'got {len(rows)} rows of {[len(r) for r in rows]} values')
+        matrix = torch.tensor(rows, dtype=torch.float64)
+        return vx.AffineMatrix(matrix, dtype=torch.float64)
+
+    def save(self, affine: vx.AffineMatrix, filename: os.PathLike) -> None:
+        matrix = affine.tensor.detach().cpu().to(torch.float64).tolist()
+        with open(filename, 'w') as f:
+            for row in matrix:
+                f.write(' '.join(f'{x:.17g}' for x in row) + '\n')
+
+
 affine_io_protocols = [
     PytorchMatrixIO,
+    TextMatrixIO,
 ]

@@ -45,3 +45,31 @@ def test_load_geometry_unsupported_format(tmp_path) -> None:
 
     with pytest.raises(NotImplementedError):
         vx.load_geometry(path)
+
+
+def test_affine_text_roundtrip(tmp_path) -> None:
+    matrix = torch.tensor([
+        [0.1, -0.2, 0.3, 12.345678901234567],
+        [0.4, 0.5, -0.6, -3.0],
+        [0.7, -0.8, 0.9, 1e-10],
+        [0.0, 0.0, 0.0, 1.0],
+    ], dtype=torch.float64)
+    affine = vx.AffineMatrix(matrix, dtype=torch.float64)
+    path = tmp_path / 'affine.txt'
+    vx.save_affine(affine, path)
+    loaded = vx.load_affine(path)
+    assert loaded.tensor.dtype == torch.float64
+    assert torch.equal(loaded.tensor, matrix)
+
+
+def test_affine_text_load_variants(tmp_path) -> None:
+    path = tmp_path / 'affine.mat'
+    path.write_text('# comment\n1 0 0 5\n0 1 0 6\n0 0 1 7\n')
+    loaded = vx.load_affine(path)
+    expected = torch.eye(4, dtype=torch.float64)
+    expected[:3, 3] = torch.tensor([5.0, 6.0, 7.0])
+    assert torch.equal(loaded.tensor, expected)
+
+    path.write_text('1 0 0\n0 1 0\n0 0 1\n')
+    with pytest.raises(ValueError):
+        vx.load_affine(path)
