@@ -263,9 +263,6 @@ def test_transform_geometry(small_volume) -> None:
     assert moved.tensor is small_volume.tensor
     assert torch.allclose(moved.geometry.tensor, (trf @ small_volume.geometry).tensor, atol=1e-5)
 
-    # an explicit None matches the header-only default
-    assert vx.volumes_equal(small_volume.transform(trf, resample=None), moved)
-
     # applying the inverse transform restores the original geometry
     restored = moved.transform(trf.inverse())
     assert vx.volumes_equal(restored, small_volume, geom_tol=1e-4)
@@ -273,12 +270,12 @@ def test_transform_geometry(small_volume) -> None:
 
 def test_transform_resample() -> None:
 
-    # when resampling, image features move in world space per the transform:
-    # the world centroid of a blob should track the transformed centroid
+    # resampling the header-transformed volume back onto its grid moves image
+    # features in world space: the blob centroid tracks the transformed centroid
     blob = blob_volume()
     trf = vx.affine.compose_affine(translation=(2, -1, 3), rotation=(5, 0, 0))
     centroid = blob.centroids('world')[0]
-    moved = blob.transform(trf, resample=True)
+    moved = blob.transform(trf).resample_like(blob)
     assert moved.baseshape == blob.baseshape
     assert torch.allclose(moved.centroids('world')[0], trf.map(centroid), atol=0.05)
 
@@ -298,11 +295,6 @@ def test_transform_warp() -> None:
 
     # the warp is a pull-back, so features move opposite the coordinate offset
     assert torch.allclose(moved.centroids('world')[0], centroid - offset, atol=0.05)
-
-    # explicitly enabling resampling matches the default, disabling it fails
-    assert vx.volumes_equal(blob.transform(warp, resample=True), moved)
-    with pytest.raises(ValueError):
-        blob.transform(warp, resample=False)
 
 
 def test_pool(small_volume) -> None:

@@ -441,29 +441,28 @@ def test_exponentiate_inverse() -> None:
 
 
 # ---------------------------------------------------------------------------
-# transform composition
+# transform series
 # ---------------------------------------------------------------------------
 
 
-def test_compose_transforms_affine() -> None:
+def test_series_affine() -> None:
     a1 = vx.affine.compose_affine(translation=(1.5, -1.0, 0.5), rotation=(3, -2, 4))
     a2 = vx.affine.compose_affine(translation=(-0.5, 1.0, 2.0), rotation=(-2, 5, 1))
 
-    # affine-only composition stays an affine equal to the matrix product
-    merged = vx.compose_transforms(a1, a2)
+    # affine-only series condense to the matrix product
+    merged = vx.TransformSeries([a1, a2]).condense()
     assert isinstance(merged, vx.AffineMatrix)
-    assert not isinstance(merged, vx.Warp)
     assert torch.allclose(merged.tensor, (a2 @ a1).tensor, atol=1e-5)
 
-    # applying the merged transform matches applying each in order
+    # applying the series matches applying each in order
     volume = vx.Volume(torch.rand(10, 12, 14), nontrivial_geometry())
     sequential = volume.transform(a1).transform(a2)
-    direct = volume.transform(merged)
+    direct = volume.transform(vx.TransformSeries([a1, a2]))
     assert torch.equal(sequential.tensor, direct.tensor)
     assert vx.geometries_equal(sequential.geometry, direct.geometry, tol=1e-4)
 
 
-def test_compose_transforms_mixed() -> None:
+def test_series_mixed() -> None:
 
     # linear-ramp moving volume large enough that every sample lands interior,
     # so each interpolation in both application paths is exact
@@ -477,34 +476,22 @@ def test_compose_transforms_mixed() -> None:
     w1 = translation_warp(vx.geometry_from_spacing((40, 40, 40), 1.0), (1.2, -0.7, 0.9))
     w2 = translation_warp(hard_geometry(), (-0.6, 1.1, -0.4))
 
-    # merged application must match applying each transform in order
+    # the series applies step by step and lands on the last warp's grid
     sequential = w2.map(w1.map(volume.transform(a1)).transform(a2))
-    merged = vx.compose_transforms(a1, w1, a2, w2)
-    assert isinstance(merged, vx.Warp)
-    assert vx.geometries_equal(merged.geometry, w2.geometry, tol=1e-4)
-    direct = merged.map(volume)
+    series = vx.TransformSeries([a1, w1, a2, w2])
+    assert len(series.condense()) == 4
+    direct = volume.transform(series)
+    assert vx.geometries_equal(direct.geometry, w2.geometry, tol=1e-4)
     assert torch.allclose(direct.tensor, sequential.tensor, atol=1e-3)
 
 
-def test_compose_transforms_trailing_affine() -> None:
+def test_series_trailing_affine() -> None:
     volume = vx.Volume(torch.rand(24, 26, 22), nontrivial_geometry((24, 26, 22)))
     w1 = translation_warp(hard_geometry(), (0.8, -0.5, 0.6))
     a2 = vx.affine.compose_affine(translation=(2.0, -1.0, 0.5), rotation=(4, 2, -3))
 
-    # a trailing affine keeps the mapping and only moves the output domain
-    merged = vx.compose_transforms(w1, a2)
-    assert isinstance(merged, vx.Warp)
-    assert torch.allclose(merged.coordinates, w1.coordinates)
+    # a trailing affine only moves the output domain of the warped result
     sequential = w1.map(volume).transform(a2)
-    direct = merged.map(volume)
+    direct = volume.transform(vx.TransformSeries([w1, a2]))
     assert torch.equal(direct.tensor, sequential.tensor)
     assert vx.geometries_equal(direct.geometry, sequential.geometry, tol=1e-4)
-
-
-def test_compose_transforms_validation() -> None:
-    with pytest.raises(ValueError):
-        vx.compose_transforms()
-    with pytest.raises(TypeError):
-        vx.compose_transforms(torch.eye(4))
-    single = vx.affine.compose_affine(translation=(1.0, 2.0, 3.0))
-    assert isinstance(vx.compose_transforms(single), vx.AffineMatrix)
