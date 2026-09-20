@@ -169,6 +169,25 @@ def test_reshape(geometry) -> None:
     assert vx.geometries_equal(grown.reshape(geometry.baseshape), geometry, tol=1e-5)
 
 
+def test_reshape_stretch(geometry) -> None:
+
+    # the world-space bounds are preserved while the spacing is rescaled per axis
+    resized = geometry.reshape((5, 24, 17), stretch=True)
+    assert resized.baseshape == (5, 24, 17)
+    assert torch.allclose(resized.bounds().corner_points(), geometry.bounds().corner_points(), atol=1e-5)
+    assert torch.allclose(resized.center, geometry.center, atol=1e-5)
+    expected_spacing = geometry.spacing * torch.tensor(geometry.baseshape) / torch.tensor([5, 24, 17])
+    assert torch.allclose(resized.spacing, expected_spacing, atol=1e-5)
+
+    # the operation is symmetric
+    assert vx.geometries_equal(resized.reshape(geometry.baseshape, stretch=True), geometry, tol=1e-5)
+
+    # an identical shape is a no-op and the two modes are mutually exclusive
+    assert geometry.reshape(geometry.baseshape, stretch=True) is geometry
+    with pytest.raises(ValueError):
+        geometry.reshape((5, 24, 17), stretch=True, from_origin=True)
+
+
 def test_resample(geometry) -> None:
     resampled = geometry.resample(2)
     assert torch.allclose(resampled.spacing, torch.full((3,), 2.0), atol=1e-5)

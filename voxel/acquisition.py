@@ -610,7 +610,8 @@ class AcquisitionGeometry(vx.AffineMatrix):
     def reshape(self,
         baseshape: int | torch.Size,
         *components: int,
-        from_origin: bool = False) -> AcquisitionGeometry:
+        from_origin: bool = False,
+        stretch: bool = False) -> AcquisitionGeometry:
         """
         Modify the spatial extent of the volume geometry, cropping or padding around the
         center image to fit a given **baseshape**.
@@ -625,6 +626,10 @@ class AcquisitionGeometry(vx.AffineMatrix):
                 be passed as separate positional arguments, e.g. `reshape(64, 64, 64)`.
             from_origin (bool, optional): If True, padding or cropping will be done
                 at the ends of the image shape and not centered.
+            stretch (bool, optional): If True, the grid is stretched (or squashed) to
+                the target shape instead of cropped or padded, i.e. the world-space
+                extent is preserved and the voxel spacing is rescaled along each axis.
+                Cannot be combined with `from_origin`.
 
         Returns:
             AcquisitionGeometry: Reshaped geometry.
@@ -635,6 +640,16 @@ class AcquisitionGeometry(vx.AffineMatrix):
         baseshape = torch.Size(baseshape)
         if baseshape == self.baseshape:
             return self
+
+        if stretch:
+            if from_origin:
+                raise ValueError('cannot set both stretch and from_origin')
+            # the new voxel size in units of the old grid, with a half-voxel shift
+            # so the outer voxel edges (not the centers) remain fixed
+            factor = torch.tensor(self.baseshape, dtype=torch.float32, device=self.device) / \
+                     torch.tensor(baseshape, dtype=torch.float32, device=self.device)
+            matrix = self.shift(0.5 * (factor - 1), space='voxel').scale(factor, space='voxel')
+            return self._from_new_properties(baseshape=baseshape, matrix=matrix.tensor)
 
         if from_origin:
             return self._from_new_properties(baseshape=baseshape, keep_reference=True)

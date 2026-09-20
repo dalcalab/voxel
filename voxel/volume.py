@@ -1370,7 +1370,12 @@ class Volume:
                                         slice_spacing=slice_spacing)
         return self.resample_like(target, mode=mode, padding_mode=padding_mode, antialias=antialias)
 
-    def reshape(self, baseshape: int | torch.Size, *components: int) -> Volume:
+    def reshape(self,
+        baseshape: int | torch.Size,
+        *components: int,
+        stretch: bool = False,
+        mode: str = None,
+        antialias: bool | float = False) -> Volume:
         """
         Modify the spatial extent of the volume, cropping or padding around the
         center image to fit a given **baseshape**.
@@ -1383,11 +1388,23 @@ class Volume:
                 is assumed if a scalar is provided.
             *components (int): Additional components of `baseshape`, allowing values to
                 be passed as separate positional arguments, e.g. `reshape(64, 64, 64)`.
+            stretch (bool, optional): If True, the image is stretched (or squashed) to
+                the target shape by interpolation instead of cropped or padded, i.e. the
+                world-space extent is preserved and the voxel spacing is rescaled along
+                each axis.
+            mode (str, optional): Interpolation mode. Defaults to 'nearest' when cropping
+                or padding (which is exact) and 'linear' when `stretch` is True.
+            antialias (bool or float, optional): If True, will apply a Gaussian filter
+                before resampling to avoid aliasing artifacts when downsampling with
+                `stretch`. See `resample_like` for details.
 
         Returns:
             Volume: Reshaped volume instance.
         """
-        return self.resample_like(self.geometry.reshape(baseshape, *components), mode='nearest')
+        if mode is None:
+            mode = 'linear' if stretch else 'nearest'
+        target = self.geometry.reshape(baseshape, *components, stretch=stretch)
+        return self.resample_like(target, mode=mode, antialias=antialias)
 
     def pad(self,
         delta: float | torch.Tensor,

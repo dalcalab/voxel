@@ -86,6 +86,7 @@ padded = vol.pad(10, space='world')        # extend grid 10 mm per side
 trimmed = vol.trim(2, space='voxel')       # remove 2 voxels per side
 low = vol.pool(scale=2, mode='mean')       # fast 2x downsample
 big = vol.reshape((256, 256, 256))         # symmetric pad or crop to a shape
+fit = vol.reshape(128, stretch=True)       # stretch to a shape, keeping the world extent
 ```
 
 Operations that change the grid, like cropping, resampling, reorienting, and pooling, return a new volume with an updated geometry, so world coordinates always stay correct, and a mesh or point set defined in world space will still line up with the result.

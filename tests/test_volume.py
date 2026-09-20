@@ -397,6 +397,8 @@ def test_variadic_components(small_volume) -> None:
     assert vx.volumes_equal(small_volume.reshape(12, 12, 12),
                             small_volume.reshape((12, 12, 12)))
     assert vx.volumes_equal(small_volume.reshape(12), small_volume.reshape((12, 12, 12)))
+    assert vx.volumes_equal(small_volume.reshape(12, 12, 12, stretch=True),
+                            small_volume.reshape((12, 12, 12), stretch=True))
     assert vx.volumes_equal(small_volume.crop_to_nonzero(1, 1, 2),
                             small_volume.crop_to_nonzero((1, 1, 2)))
     assert vx.volumes_equal(small_volume.pool(2, 2, 2), small_volume.pool(2))
