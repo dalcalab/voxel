@@ -46,8 +46,10 @@ from . import mesh
 from .mesh import Mesh
 
 from . import snapshots
-from .snapshots import pca
 from .snapshots import snapshot
+
+from . import decomposition
+from .decomposition import pca
 
 from . import io
 from .io.volume import load_volume

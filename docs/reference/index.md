@@ -42,3 +42,4 @@ Core classes and I/O functions are available at the top level (`vx.Volume`, `vx.
 | [filters](functions/filters.md) | Convolution filtering |
 | [morphology](functions/morphology.md) | Binary morphology and labeling |
 | [snapshots](functions/snapshots.md) | 2D visualization |
+| [decomposition](functions/decomposition.md) | Feature decomposition |

@@ -75,6 +75,7 @@ nav:
           - filters: reference/functions/filters.md
           - morphology: reference/functions/morphology.md
           - snapshots: reference/functions/snapshots.md
+          - decomposition: reference/functions/decomposition.md
 
 plugins:
   - search
