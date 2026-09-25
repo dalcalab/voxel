@@ -47,6 +47,8 @@ from .mesh import Mesh
 
 from . import snapshots
 from .snapshots import snapshot
+from .snapshots import projection
+from .snapshots import sliding_projection
 
 from . import decomposition
 from .decomposition import pca

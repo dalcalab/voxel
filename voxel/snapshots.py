@@ -29,6 +29,14 @@ PALETTE = torch.tensor([
     [0.60, 0.60, 0.60],  # gray
 ])
 
+# world-space unit directions of the anatomical axis letters, used to specify
+# projection viewpoints and up directions
+DIRECTIONS = {
+    'R': (1, 0, 0), 'L': (-1, 0, 0),
+    'A': (0, 1, 0), 'P': (0, -1, 0),
+    'S': (0, 0, 1), 'I': (0, 0, -1),
+}
+
 
 @torch.no_grad()
 def snapshot(
@@ -231,3 +239,248 @@ def snapshot(
     image = (image.clamp(0, 1).detach() * 255).round().to(torch.uint8)
     slices = list(image.movedim(0, -1).unbind(dim=0))
     return slices[0] if len(slices) == 1 else slices
+
+
+@torch.no_grad()
+def projection(
+    volume: vx.Volume,
+    mode: str,
+    exclude: vx.Volume | None = None,
+    center: torch.Tensor | None = None,
+    viewpoint: str | torch.Tensor = 'A',
+    up: str | torch.Tensor | None = None,
+    viewport: float | None = None,
+    depth: float | None = None,
+    res: int = 256,
+    ) -> torch.Tensor:
+    """
+    Project a volume onto a 2D image plane along a view direction,
+    for example to generate a maximum intensity projection (MIP).
+
+    Args:
+        volume (Volume): Volume to project.
+        mode (str, optional): Reduction applied along each ray, either 'max',
+            'min', or 'mean'. Defaults to 'max'.
+        exclude (Volume, optional): Mask whose nonzero voxels are ignored by the
+            projection. A raw tensor is assumed to share the volume geometry.
+        center (Tensor, optional): World-space (x, y, z) coordinate at the center
+            of the image. Defaults to the center of the volume geometry.
+        viewpoint (str or Tensor, optional): World-space direction of the camera
+            relative to the center, either an anatomical axis letter ('R', 'L',
+            'A', 'P', 'S', or 'I') or a vector. Defaults to 'A', which views
+            from anterior.
+        up (str or Tensor, optional): World-space direction pointing to the top
+            of the image, as an axis letter or a vector. It is made orthogonal
+            to the view direction, so it only needs to be roughly upward. If
+            None, it is superior, or anterior when viewing along the
+            superior-inferior axis.
+        viewport (float, optional): Width and height of the square image plane in
+            world units. Defaults to the extent of the volume from the viewpoint.
+        depth (float, optional): Thickness of the projected slab in world units,
+            centered at `center` along the view direction. Defaults to the full
+            extent of the volume.
+        res (int, optional): Pixel height and width of the image. Defaults to 256.
+
+    Returns:
+        Tensor: A $(H, W, C)$ float image of projected intensities.
+    """
+    if isinstance(volume, torch.Tensor):
+        volume = vx.Volume(volume)
+
+    if mode not in ('max', 'min', 'mean'):
+        raise ValueError(f'unknown projection mode \'{mode}\', expected max, min, or mean')
+    if res < 1:
+        raise ValueError(f'res must be positive, got {res}')
+    if viewport is not None and viewport <= 0:
+        raise ValueError(f'viewport must be positive, got {viewport}')
+    if depth is not None and depth <= 0:
+        raise ValueError(f'depth must be positive, got {depth}')
+
+    geometry = volume.geometry
+    device = geometry.device
+
+    if center is None:
+        center = geometry.center
+    center = torch.as_tensor(center, dtype=torch.float32, device=device)
+
+    # build the camera basis. the forward direction points from the camera into
+    # the scene, and up is superior by default unless the view runs along that
+    # axis. the up direction is made orthogonal to the forward direction
+    forward = -_unit_direction(viewpoint, 'viewpoint', device)
+    if up is None:
+        up = 'A' if forward[2].abs() > 0.99 else 'S'
+    up = _unit_direction(up, 'up', device)
+    up = up - forward.dot(up) * forward
+    if up.norm() < 1e-3:
+        raise ValueError('up direction must not be parallel to the viewpoint')
+    up = up / up.norm()
+    right = torch.cross(forward, up, dim=0)
+
+    # measure the extent of the volume along each camera axis
+    corners = geometry.bounds().corner_points() - center
+    distance = corners @ forward
+    near, far = distance.min(), distance.max()
+    if viewport is None:
+        rows = corners @ up
+        cols = corners @ right
+        viewport = max(float(rows.max() - rows.min()), float(cols.max() - cols.min()))
+
+    # build a view-aligned grid with depth along the first axis, sampled at the
+    # finest input spacing, and image rows and columns running down and right.
+    # the grid spans the volume along the depth axis, optionally restricted to
+    # a slab around the center, with a small tolerance so float error does not
+    # add an extra sample
+    pixel = viewport / res
+    step = geometry.spacing.min()
+    if depth is not None:
+        near = near.clamp(min=-depth / 2)
+        far = far.clamp(max=depth / 2)
+    num = int(((far - near) / step - 1e-3).ceil().clamp(min=1))
+    matrix = torch.eye(4, device=device)
+    matrix[:3, :3] = torch.stack((forward * step, -up * pixel, right * pixel), dim=1)
+    target = vx.AcquisitionGeometry((num, res, res), matrix)
+    target = target.shift_to_point(center + forward * (near + far) / 2)
+
+    # out-of-bounds and excluded samples take a fill value that is neutral to
+    # the reduction, so rays that miss the volume read as background
+    fill = float({'max': volume.min(), 'min': volume.max(), 'mean': 0}[mode])
+    reduce, combine = {
+        'max': (torch.amax, torch.maximum),
+        'min': (torch.amin, torch.minimum),
+        'mean': (torch.sum, torch.add),
+    }[mode]
+
+    if exclude is not None:
+        if isinstance(exclude, torch.Tensor):
+            exclude = vx.Volume(exclude, geometry)
+        exclude = (exclude != 0).float()
+
+    # the mean is normalized by the number of in-bounds, non-excluded samples
+    # along each ray, tracked by resampling a mask of ones
+    ones = geometry.ones_like() if mode == 'mean' else None
+
+    # number of grid samples resampled at once when computing projections. the
+    # view-aligned grid is processed in depth slabs of this size to bound memory
+    slab_samples = 2 ** 24
+
+    # resample and reduce the grid in depth slabs to bound peak memory
+    image = torch.full((volume.num_channels, res, res), fill, device=device)
+    count = torch.zeros((1, res, res), device=device)
+    slab = max(1, slab_samples // (res * res))
+    for start in range(0, num, slab):
+        chunk = target.shift((start, 0, 0), space='voxel')
+        chunk = chunk.reshape((min(slab, num - start), res, res), from_origin=True)
+        values = volume.resample_like(chunk, padding_mode='fill', fill=fill).tensor
+        if exclude is not None:
+            excluded = exclude.resample_like(chunk).tensor > 0.5
+            values = values.masked_fill(excluded, fill)
+        image = combine(image, reduce(values, 1))
+        if ones is not None:
+            include = ones.resample_like(chunk, padding_mode='fill', fill=0).tensor
+            if exclude is not None:
+                include = include * ~excluded
+            count = count + include.sum(1)
+
+    if mode == 'mean':
+        image = image / count.clamp(min=1e-6)
+
+    return image.movedim(0, -1)
+
+
+@torch.no_grad()
+def sliding_projection(
+    volume: vx.Volume,
+    depth: float,
+    mode: str,
+    dim: int | str | None = None,
+    ) -> vx.Volume:
+    """
+    Compute a sliding window projection along a voxel axis, for example a
+    sliding maximum intensity projection (MIP).
+
+    Each slice is replaced by the reduction over a window of neighboring slices
+    centered on it, so the output matches the input geometry. Windows are
+    truncated at the edges of the volume.
+
+    Args:
+        volume (Volume): Volume to project.
+        depth (float): Thickness of the window in world units, rounded to the
+            nearest whole number of slices (at least one).
+        mode (str, optional): Reduction applied over each window, either 'max',
+            'min', or 'mean'. Defaults to 'max'.
+        dim (int or str, optional): Voxel axis to slide along, either an index or
+            a view name ('axial', 'coronal', or 'sagittal', or their first
+            letters) selecting the voxel axis closest to that view direction.
+            Defaults to the slice direction of the geometry.
+
+    Returns:
+        Volume: Projected volume with the same geometry as the input.
+    """
+    if isinstance(volume, torch.Tensor):
+        volume = vx.Volume(volume)
+
+    if mode not in ('max', 'min', 'mean'):
+        raise ValueError(f'unknown projection mode \'{mode}\', expected max, min, or mean')
+    if depth <= 0:
+        raise ValueError(f'depth must be positive, got {depth}')
+
+    geometry = volume.geometry
+    if dim is None:
+        dim = int(geometry.slice_direction)
+    elif isinstance(dim, str):
+        # the first letter of the view orientation names its through-plane
+        # direction, which is matched (either sign) against the voxel axes
+        view = dim.lower()
+        if view not in VIEWS:
+            raise ValueError(f'unknown view \'{dim}\', expected one of axial, coronal, or sagittal')
+        letter = VIEWS[view][0]
+        opposite = dict(S='I', A='P', L='R')[letter]
+        dim = next(i for i, c in enumerate(geometry.orientation.name) if c in (letter, opposite))
+    if dim not in (0, 1, 2):
+        raise ValueError(f'dim must be a spatial axis 0, 1, or 2, got {dim}')
+
+    # the window covers the slices at offsets [lower, upper] around each slice,
+    # with the extra slice of an even window falling on the upper side
+    num = max(1, round(depth / float(geometry.spacing[dim])))
+    lower, upper = -((num - 1) // 2), num // 2
+
+    tensor = volume.tensor.float() if mode == 'mean' else volume.tensor
+    axis = dim + 1
+    length = tensor.shape[axis]
+    combine = {'max': torch.maximum, 'min': torch.minimum, 'mean': torch.add}[mode]
+
+    # accumulate the window in place, combining the output with a copy of the
+    # input shifted by each offset over the range where the two overlap. this
+    # avoids materializing a stack of shifted copies
+    result = tensor.clone()
+    count = torch.ones(length, device=tensor.device)
+    for offset in range(lower, upper + 1):
+        size = length - abs(offset)
+        if offset == 0 or size <= 0:
+            continue
+        start = max(0, -offset)
+        target = result.narrow(axis, start, size)
+        combine(target, tensor.narrow(axis, max(0, offset), size), out=target)
+        count[start:start + size] += 1
+
+    # the mean divides by the number of slices in each (possibly truncated) window
+    if mode == 'mean':
+        shape = [1] * result.ndim
+        shape[axis] = length
+        result = result / count.view(shape)
+
+    return volume.new(result)
+
+
+def _unit_direction(direction: str | torch.Tensor, name: str, device: torch.device) -> torch.Tensor:
+    """
+    Convert an anatomical axis letter or a vector into a world-space unit vector.
+    """
+    if isinstance(direction, str):
+        if direction.upper() not in DIRECTIONS:
+            raise ValueError(f'unknown {name} direction \'{direction}\', expected one of R, L, A, P, S, or I')
+        direction = DIRECTIONS[direction.upper()]
+    direction = torch.as_tensor(direction, dtype=torch.float32, device=device)
+    if direction.shape != (3,) or direction.norm() == 0:
+        raise ValueError(f'{name} must be a nonzero 3D vector')
+    return direction / direction.norm()

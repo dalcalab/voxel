@@ -1322,7 +1322,7 @@ class Volume:
             out_of_bounds = (grid < -1).any(-1) | (grid > 1).any(-1)
             if isinstance(fill, torch.Tensor):
                 fill = fill.type(resampled.dtype)
-            resampled[out_of_bounds.unsqueeze(0)] = fill
+            resampled[:, out_of_bounds] = fill
 
         if antialias:
             kernels = [vx.filters.gaussian_kernel_1d(float(s), truncate, device=resampled.device) for s in sigma]

@@ -163,3 +163,207 @@ def test_snapshot_validation(volume) -> None:
     rgb = vx.volume.stack(volume, volume, volume) * 10
     with pytest.raises(ValueError):
         vx.snapshot(rgb)
+
+
+@pytest.fixture
+def aligned() -> vx.Volume:
+    # an isotropic RAS volume, so that with res matching the grid size the
+    # projection samples land exactly on voxel centers
+    return vx.AcquisitionGeometry((12, 12, 12)).rand_like(channels=2)
+
+
+def to_image(reduced: torch.Tensor) -> torch.Tensor:
+    # convert a (C, A, B) axis-aligned reduction into a (B, A, C) image with
+    # both image axes flipped, matching the upright projection layout
+    return reduced.transpose(1, 2).flip(1, 2).movedim(0, -1)
+
+
+def test_projection_output(volume) -> None:
+
+    # the projection is a channels-last (H, W, C) float image
+    image = vx.projection(volume, res=64)
+    assert image.shape == (64, 64, 1)
+    assert image.dtype == torch.float32
+
+    # channels are projected independently
+    stacked = vx.volume.stack(volume, volume * 2)
+    image = vx.projection(stacked, 'mean', res=32)
+    assert image.shape == (32, 32, 2)
+    assert torch.allclose(image[..., 1], image[..., 0] * 2, atol=1e-5)
+
+
+def test_projection_aligned(aligned) -> None:
+
+    # an anterior view reduces along y, with superior at the top of the image
+    # and the subject's left on the right
+    tensor = aligned.tensor
+    reductions = dict(max=tensor.amax(2), min=tensor.amin(2), mean=tensor.mean(2))
+    for mode, reduced in reductions.items():
+        image = vx.projection(aligned, mode, res=12)
+        assert torch.allclose(image, to_image(reduced), atol=1e-5)
+
+    # the viewpoint does not need to be a unit vector
+    image = vx.projection(aligned, res=12)
+    assert torch.allclose(vx.projection(aligned, viewpoint=(0, 5, 0), res=12), image, atol=1e-5)
+
+    # an inferior view reduces along z, with anterior at the top of the image
+    inferior = vx.projection(aligned, viewpoint=(0, 0, -1), res=12)
+    assert torch.allclose(inferior, to_image(tensor.amax(3)), atol=1e-5)
+
+
+def test_projection_framing(aligned) -> None:
+    image = vx.projection(aligned, res=12)
+
+    # moving the center along image-right shifts the image content left
+    center = aligned.geometry.center + torch.tensor([-3.0, 0, 0])
+    shifted = vx.projection(aligned, center=center, res=12)
+    assert torch.allclose(shifted[:, :-3], image[:, 3:], atol=1e-5)
+
+    # a larger viewport at the same pixel size pads the image with the fill
+    # value, which is the volume minimum for a maximum projection
+    padded = vx.projection(aligned, viewport=24, res=24)
+    assert torch.allclose(padded[6:18, 6:18], image, atol=1e-5)
+    assert torch.all(padded[:6] == aligned.min())
+
+
+def test_projection_depth(aligned) -> None:
+    tensor = aligned.tensor
+
+    # a depth restricts the projection to a slab around the center, here the
+    # four voxel planes nearest the center along y
+    image = vx.projection(aligned, depth=4, res=12)
+    assert torch.allclose(image, to_image(tensor[:, :, 4:8].amax(2)), atol=1e-5)
+
+    # the slab follows the center along the view direction
+    center = aligned.geometry.center + torch.tensor([0, 3.0, 0])
+    image = vx.projection(aligned, center=center, depth=4, res=12)
+    assert torch.allclose(image, to_image(tensor[:, :, 7:11].amax(2)), atol=1e-5)
+
+    # a depth beyond the volume extent covers the whole volume
+    assert torch.allclose(vx.projection(aligned, depth=100, res=12),
+                          vx.projection(aligned, res=12), atol=1e-5)
+
+
+def test_projection_viewpoint(volume) -> None:
+
+    # opposite viewpoints sample the same rays, mirroring the image
+    viewpoint = torch.tensor([0.3, -0.5, 0.8])
+    front = vx.projection(volume, viewpoint=viewpoint, res=32)
+    back = vx.projection(volume, viewpoint=-viewpoint, res=32)
+    assert torch.allclose(back, front.flip(1), atol=1e-4)
+
+
+def test_projection_exclude(aligned) -> None:
+    tensor = aligned.tensor
+    image = vx.projection(aligned, res=12)
+
+    # excluding the brightest voxel lowers the maximum along its ray
+    exclude = tensor[:1] == tensor[0].max()
+    excluded = vx.projection(aligned, exclude=exclude, res=12)
+    assert excluded[..., 0].max() < image[..., 0].max()
+
+    # the mean is taken over the remaining samples along each ray
+    exclude = aligned.zeros_like(channels=1)
+    exclude.tensor[:, :, 6:] = 1
+    mean = vx.projection(aligned, 'mean', exclude=exclude, res=12)
+    assert torch.allclose(mean, to_image(tensor[:, :, :6].mean(2)), atol=1e-5)
+
+    # excluding everything leaves only the fill value
+    everything = aligned.ones_like(channels=1)
+    assert torch.all(vx.projection(aligned, exclude=everything, res=12) == aligned.min())
+    assert torch.all(vx.projection(aligned, 'mean', exclude=everything, res=12) == 0)
+
+
+def test_projection_directions(aligned) -> None:
+    tensor = aligned.tensor
+
+    # axis letters are equivalent to their world-space vectors
+    assert torch.allclose(vx.projection(aligned, viewpoint='I', res=12),
+                          vx.projection(aligned, viewpoint=(0, 0, -1), res=12), atol=1e-5)
+
+    # flipping the up direction rotates the image by 180 degrees
+    inferior = vx.projection(aligned, viewpoint='I', res=12)
+    flipped = vx.projection(aligned, viewpoint='I', up='P', res=12)
+    assert torch.allclose(flipped, inferior.flip(0, 1), atol=1e-5)
+
+    # with right as up, the image rows run toward the left and the columns
+    # toward superior
+    image = vx.projection(aligned, viewpoint='A', up='R', res=12)
+    assert torch.allclose(image, tensor.amax(2).flip(1).movedim(0, -1), atol=1e-5)
+
+    # the up direction only needs to be roughly upward
+    tilted = vx.projection(aligned, up=(0, 0.5, 1), res=12)
+    assert torch.allclose(tilted, vx.projection(aligned, res=12), atol=1e-5)
+
+
+def test_projection_validation(volume) -> None:
+    with pytest.raises(ValueError):
+        vx.projection(volume, mode='median')
+    with pytest.raises(ValueError):
+        vx.projection(volume, viewpoint=(0, 0, 0))
+    with pytest.raises(ValueError):
+        vx.projection(volume, viewpoint='X')
+    with pytest.raises(ValueError):
+        vx.projection(volume, viewpoint=(0, 1))
+    with pytest.raises(ValueError):
+        vx.projection(volume, viewpoint='A', up='P')
+    with pytest.raises(ValueError):
+        vx.projection(volume, res=0)
+    with pytest.raises(ValueError):
+        vx.projection(volume, viewport=0)
+    with pytest.raises(ValueError):
+        vx.projection(volume, depth=0)
+
+
+def test_sliding_projection(volume) -> None:
+    tensor = volume.tensor
+    reductions = dict(max=torch.amax, min=torch.amin, mean=torch.mean)
+
+    def naive(dim, num, reduce):
+        # reduce a truncated window of num slices around each slice, with the
+        # extra slice of an even window on the upper side
+        slices = []
+        for i in range(tensor.shape[dim + 1]):
+            lo, hi = max(0, i - (num - 1) // 2), min(tensor.shape[dim + 1], i + num // 2 + 1)
+            slices.append(reduce(tensor.narrow(dim + 1, lo, hi - lo), dim + 1))
+        return torch.stack(slices, dim + 1)
+
+    # odd and even windows along every axis, with depth in world units
+    for dim in range(3):
+        spacing = float(volume.geometry.spacing[dim])
+        for num in (1, 3, 4):
+            for mode, reduce in reductions.items():
+                result = vx.sliding_projection(volume, depth=num * spacing, mode=mode, dim=dim)
+                assert vx.geometries_equal(result.geometry, volume.geometry)
+                assert torch.allclose(result.tensor, naive(dim, num, reduce), atol=1e-6)
+
+    # the default axis is the slice direction
+    dim = int(volume.geometry.slice_direction)
+    spacing = float(volume.geometry.spacing[dim])
+    assert torch.equal(vx.sliding_projection(volume, depth=3 * spacing).tensor,
+                       vx.sliding_projection(volume, depth=3 * spacing, dim=dim).tensor)
+
+    # view names select the voxel axis closest to the view direction, in any
+    # voxel orientation
+    views = dict(S='axial', I='axial', A='coronal', P='coronal', L='sagittal', R='sagittal')
+    for vol in (volume, volume.reorient('PSL')):
+        for dim, letter in enumerate(vol.geometry.orientation.name):
+            spacing = float(vol.geometry.spacing[dim])
+            expected = vx.sliding_projection(vol, depth=3 * spacing, dim=dim).tensor
+            for view in (views[letter], views[letter][0]):
+                assert torch.equal(vx.sliding_projection(vol, depth=3 * spacing, dim=view).tensor, expected)
+
+    # a window thinner than a slice leaves the volume unchanged, and max
+    # projections preserve integer data types
+    quantized = (volume * 255).int()
+    assert torch.equal(vx.sliding_projection(quantized, depth=0.1).tensor, quantized.tensor)
+    assert vx.sliding_projection(quantized, depth=5).dtype == torch.int32
+
+    with pytest.raises(ValueError):
+        vx.sliding_projection(volume, depth=5, mode='median')
+    with pytest.raises(ValueError):
+        vx.sliding_projection(volume, depth=0)
+    with pytest.raises(ValueError):
+        vx.sliding_projection(volume, depth=5, dim=3)
+    with pytest.raises(ValueError):
+        vx.sliding_projection(volume, depth=5, dim='oblique')

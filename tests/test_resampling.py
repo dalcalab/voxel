@@ -67,6 +67,13 @@ def test_resample_multichannel(brain) -> None:
     assert vx.volumes_equal(resampled[[0]], a.resample_like(target), vol_tol=1e-4)
     assert vx.volumes_equal(resampled[[1]], b.resample_like(target), vol_tol=1e-4)
 
+    # the out-of-bounds fill value applies to every channel
+    target = target.shift((50, 0, 0), 'world')
+    filled = vx.volume.stack(a, b).resample_like(target, padding_mode='fill', fill=-1)
+    assert vx.volumes_equal(filled[[0]], a.resample_like(target, padding_mode='fill', fill=-1), vol_tol=1e-4)
+    assert vx.volumes_equal(filled[[1]], b.resample_like(target, padding_mode='fill', fill=-1), vol_tol=1e-4)
+    assert (filled.tensor == -1).any()
+
 
 def test_resample_roundtrip(brain) -> None:
 
