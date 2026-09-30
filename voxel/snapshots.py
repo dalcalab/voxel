@@ -259,8 +259,8 @@ def projection(
 
     Args:
         volume (Volume): Volume to project.
-        mode (str, optional): Reduction applied along each ray, either 'max',
-            'min', or 'mean'. Defaults to 'max'.
+        mode (str): Reduction applied along each ray, either 'max',
+            'min', or 'mean'.
         exclude (Volume, optional): Mask whose nonzero voxels are ignored by the
             projection. A raw tensor is assumed to share the volume geometry.
         center (Tensor, optional): World-space (x, y, z) coordinate at the center
@@ -406,8 +406,8 @@ def sliding_projection(
         volume (Volume): Volume to project.
         depth (float): Thickness of the window in world units, rounded to the
             nearest whole number of slices (at least one).
-        mode (str, optional): Reduction applied over each window, either 'max',
-            'min', or 'mean'. Defaults to 'max'.
+        mode (str): Reduction applied over each window, either 'max',
+            'min', or 'mean'.
         dim (int or str, optional): Voxel axis to slide along, either an index or
             a view name ('axial', 'coronal', or 'sagittal', or their first
             letters) selecting the voxel axis closest to that view direction.
