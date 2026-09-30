@@ -1212,7 +1212,8 @@ class Volume:
         fill: float = 0,
         antialias: bool | float = False) -> Volume:
         """
-        Resample the volume features to match the geometry of a target volume.
+        Resample the volume features to match the geometry of a target volume. On
+        CUDA devices with Triton available, interpolation runs in a grid-free kernel.
 
         Args:
             target (Volume | AcquisitionGeometry): Target acquisition geometry.
@@ -1304,25 +1305,8 @@ class Volume:
         else:
             intermediate_baseshape = target.baseshape
 
-        grid = volume_grid(intermediate_baseshape, transform=transform,
-                           localshape=self.baseshape, device=self.device)
-
-        fill_out_of_bounds = padding_mode == 'fill'
-        if fill_out_of_bounds:
-            padding_mode = 'border'
-
-        resampled = torch.nn.functional.grid_sample(
-                        input=self.tensor.float().unsqueeze(0),
-                        grid=grid.unsqueeze(0),
-                        mode=('bilinear' if mode == 'linear' else mode),
-                        padding_mode=padding_mode,
-                        align_corners=False).squeeze(0)
-    
-        if fill_out_of_bounds:
-            out_of_bounds = (grid < -1).any(-1) | (grid > 1).any(-1)
-            if isinstance(fill, torch.Tensor):
-                fill = fill.type(resampled.dtype)
-            resampled[:, out_of_bounds] = fill
+        resampled = vx.resampling.resample_tensor(self.tensor, intermediate_baseshape, transform,
+                                                  mode=mode, padding_mode=padding_mode, fill=fill)
 
         if antialias:
             kernels = [vx.filters.gaussian_kernel_1d(float(s), truncate, device=resampled.device) for s in sigma]

@@ -1,3 +1,4 @@
+import pytest
 import torch
 import voxel as vx
 
@@ -122,3 +123,73 @@ def test_resample_variadic(brain) -> None:
     resampled = brain.resample(2)
     assert vx.volumes_equal(brain.resample(2, 2, 2), resampled)
     assert vx.volumes_equal(brain.resample((2, 2, 2)), resampled)
+
+
+# the triton kernel needs a cuda device, or the triton interpreter for cpu-only testing
+_TRITON = vx.resampling.triton is not None and (torch.cuda.is_available() or vx.resampling._INTERPRET)
+_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+def _voxel_to_voxel(source_shape, output_shape) -> vx.AffineMatrix:
+    """
+    A rotated, anisotropically scaled, and fractionally shifted mapping from
+    output voxels to source voxels, roughly centered on the source volume.
+    """
+    rotation = vx.affine.angles_to_rotation_matrix(torch.tensor([13.7, -21.3, 8.9])).tensor[:3, :3]
+    matrix = torch.eye(4)
+    matrix[:3, :3] = rotation @ torch.diag(torch.tensor([1.13, 0.71, 1.37]))
+    matrix[:3, 3] = torch.tensor(source_shape) / 2 - matrix[:3, :3] @ (torch.tensor(output_shape) / 2) \
+                  + torch.tensor([0.31, -1.27, 0.53])
+    return vx.AffineMatrix(matrix.to(_DEVICE))
+
+
+@pytest.mark.skipif(not _TRITON, reason='requires triton on cuda, or TRITON_INTERPRET=1')
+@pytest.mark.parametrize('mode', ['linear', 'nearest'])
+@pytest.mark.parametrize('padding_mode', ['zeros', 'border', 'fill'])
+def test_triton_resampling(mode, padding_mode) -> None:
+    triton, torch_ = vx.resampling._resample_triton, vx.resampling._resample_torch
+    shape, outshape = (10, 12, 14), (11, 9, 16)
+    matrix = _voxel_to_voxel(shape, outshape)
+    source = torch.rand(3, *shape, device=_DEVICE)
+
+    # the kernel reproduces grid_sample up to float32 round-off in linear mode and exactly
+    # in nearest mode (ties have measure zero for this matrix), for float and integer sources
+    for tensor in (source, (source * 255).to(torch.uint8)):
+        a = triton(tensor, outshape, matrix, mode, padding_mode, -7.0)
+        b = torch_(tensor, outshape, matrix, mode, padding_mode, -7.0)
+        assert a.dtype == b.dtype == torch.float32
+        assert torch.allclose(a, b, atol=(1e-5 * b.abs().max().item() if mode == 'linear' else 0), rtol=0)
+    if padding_mode == 'fill':
+        assert (a == -7).any() and not (a == -7).all()
+
+    # gradients with respect to the source and the matrix match the grid_sample path,
+    # for every combination of which inputs require gradients
+    weights = torch.randn(3, *outshape, device=_DEVICE)
+    for need_source, need_matrix in ((True, True), (True, False), (False, True)):
+        grads = []
+        for func in (triton, torch_):
+            s = source.clone().requires_grad_(need_source)
+            m = vx.AffineMatrix(matrix.tensor.clone().requires_grad_(need_matrix))
+            (func(s, outshape, m, mode, padding_mode, -7.0) * weights).sum().backward()
+            grads.append((s.grad, m.tensor.grad))
+        (sa, ma), (sb, mb) = grads
+        if need_source:
+            assert torch.allclose(sa, sb, atol=1e-5 * sb.abs().max().item(), rtol=0)
+        if need_matrix and mode == 'linear':
+            assert torch.allclose(ma, mb, atol=1e-3 * mb.abs().max().item(), rtol=0)
+        elif need_matrix:
+            # nearest interpolation has no coordinate gradient (grid_sample gives zeros)
+            assert ma is None and not mb.any()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or vx.resampling.triton is None, reason='requires cuda')
+def test_triton_no_shape_recompile() -> None:
+    kernel = vx.resampling._resample_forward
+    compiled = lambda: sum(len(entry[0]) for entry in kernel.device_caches.values())
+    args = dict(mode='linear', padding_mode='zeros', fill=0.0)
+    vx.resampling._resample_triton(torch.rand(1, 8, 8, 8, device='cuda'), (8, 8, 8), _voxel_to_voxel((8, 8, 8), (8, 8, 8)), **args)
+    count = compiled()
+    for shape, outshape in (((1, 16, 32, 48), (7, 1, 9)), ((3, 5, 7, 9), (32, 16, 64)), ((16, 1, 1, 17), (1, 1, 1))):
+        source = torch.rand(*shape, device='cuda')
+        vx.resampling._resample_triton(source, outshape, _voxel_to_voxel(shape[1:], outshape), **args)
+    assert compiled() == count

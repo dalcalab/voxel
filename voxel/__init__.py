@@ -33,6 +33,8 @@ from . import volume
 from .volume import Volume
 from .volume import volumes_equal
 
+from . import resampling
+
 from . import warp
 from .warp import Warp
 from .warp import VectorField
