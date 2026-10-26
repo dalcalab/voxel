@@ -441,6 +441,101 @@ def test_exponentiate_inverse() -> None:
 
 
 # ---------------------------------------------------------------------------
+# affine transform of a field
+# ---------------------------------------------------------------------------
+
+
+def test_transform_affine_voxel_space_keeps_vectors() -> None:
+    geometry = hard_geometry()
+    field = sinusoidal_field(geometry, 'voxel')
+    affine = vx.affine.compose_affine(translation=torch.tensor([4.0, -2.0, 1.0]),
+                                      rotation=torch.tensor([30.0, -15.0, 50.0]))
+    moved = field.transform(affine)
+    assert isinstance(moved, vx.VectorField) and moved.space == 'voxel'
+    assert torch.equal(moved.tensor, field.tensor)
+    assert torch.allclose(moved.geometry.tensor, (affine @ geometry).tensor, atol=1e-5)
+
+
+def test_transform_affine_world_space_rotates_vectors() -> None:
+    geometry = hard_geometry()
+    field = sinusoidal_field(geometry, 'world')
+    affine = vx.affine.compose_affine(translation=torch.tensor([4.0, -2.0, 1.0]),
+                                      rotation=torch.tensor([30.0, -15.0, 50.0]),
+                                      scale=torch.tensor([1.2, 0.9, 1.1]))
+    moved = field.transform(affine)
+    assert moved.space == 'world'
+
+    # the world vectors are carried by the linear part of the affine, not just relocated
+    linear = affine.tensor[:3, :3]
+    expected = torch.einsum('ij,jwhd->iwhd', linear, field.tensor)
+    assert torch.allclose(moved.tensor, expected, atol=1e-4)
+    assert torch.allclose(moved.geometry.tensor, (affine @ geometry).tensor, atol=1e-5)
+
+
+@pytest.mark.parametrize('space', ['world', 'voxel'])
+def test_transform_affine_commutes_with_warping(space) -> None:
+    geometry = hard_geometry(baseshape=(16, 18, 14))
+    volume = linear_ramp_volume(geometry)
+    field = sinusoidal_field(geometry, space, amplitude=0.8, period=30.0)
+    affine = vx.affine.compose_affine(translation=torch.tensor([4.0, -2.0, 1.0]),
+                                      rotation=torch.tensor([30.0, -15.0, 50.0]),
+                                      scale=torch.tensor([1.2, 0.9, 1.1]))
+
+    # deforming then moving must equal moving the volume and the field, then deforming
+    deformed_then_moved = volume.transform(field).transform(affine)
+    moved_then_deformed = volume.transform(affine).transform(field.transform(affine))
+    assert torch.allclose(deformed_then_moved.geometry.tensor, moved_then_deformed.geometry.tensor, atol=1e-5)
+    assert torch.allclose(deformed_then_moved.tensor, moved_then_deformed.tensor, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# composition
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('space', ['world', 'voxel'])
+def test_compose_constant_fields(space) -> None:
+    geometry = hard_geometry()
+    grid = geometry.map(vx.volume.volume_grid(geometry.baseshape))
+
+    def constant(offset):
+        vectors = torch.tensor(offset).expand(*geometry.baseshape, 3).permute(3, 0, 1, 2)
+        return vx.VectorField(vectors.contiguous(), geometry, space='world').in_space(space)
+
+    # two translations compose to their sum where the first field is still sampled in bounds
+    composed = vx.compose_vector_fields(constant((0.5, -0.3, 0.2)), constant((-0.2, 0.4, 0.1)))
+    assert composed.space == space
+    expected = torch.tensor([0.3, 0.1, 0.3]).expand(*geometry.baseshape, 3)
+    inside = composed.in_space('world').tensor.permute(1, 2, 3, 0)[interior(2)]
+    assert torch.allclose(inside, expected[interior(2)], atol=1e-5)
+
+
+def test_compose_matches_series() -> None:
+    geometry = hard_geometry(baseshape=(16, 18, 14))
+    volume = linear_ramp_volume(geometry)
+    first = sinusoidal_field(geometry, 'world', amplitude=0.8, period=40.0)
+    second = sinusoidal_field(geometry, 'voxel', amplitude=0.6, period=30.0)
+
+    # applying the fields one after the other must match applying their composition
+    stepwise = volume.transform(vx.TransformSeries([first, second]))
+    composed = volume.transform(vx.compose_vector_fields(first, second))
+    assert torch.allclose(stepwise.tensor[(slice(None),) + interior(3)],
+                          composed.tensor[(slice(None),) + interior(3)], atol=1e-3)
+
+
+def test_compose_exponentiated_inverse() -> None:
+    geometry = hard_geometry(baseshape=(16, 18, 14))
+    field = sinusoidal_field(geometry, 'world', amplitude=1.0, period=40.0)
+    forward = field.exponentiate(steps=6)
+    backward = field.new(-field.tensor).exponentiate(steps=6)
+
+    # a flow composed with its reverse flow is the identity
+    composed = vx.compose_vector_fields(forward, backward)
+    inside = composed.tensor.permute(1, 2, 3, 0)[interior(3)]
+    assert torch.allclose(inside, torch.zeros_like(inside), atol=0.05)
+
+
+# ---------------------------------------------------------------------------
 # transform series
 # ---------------------------------------------------------------------------
 
@@ -476,10 +571,11 @@ def test_series_mixed() -> None:
     w1 = translation_warp(vx.geometry_from_spacing((40, 40, 40), 1.0), (1.2, -0.7, 0.9))
     w2 = translation_warp(hard_geometry(), (-0.6, 1.1, -0.4))
 
-    # the series applies step by step and lands on the last warp's grid
+    # the series condenses to an affine and a warp pinned to the last warp's grid
     sequential = w2.map(w1.map(volume.transform(a1)).transform(a2))
     series = vx.TransformSeries([a1, w1, a2, w2])
-    assert len(series.condense()) == 4
+    condensed = series.condense()
+    assert len(condensed) == 2 and isinstance(condensed[1], vx.Warp)
     direct = volume.transform(series)
     assert vx.geometries_equal(direct.geometry, w2.geometry, tol=1e-4)
     assert torch.allclose(direct.tensor, sequential.tensor, atol=1e-3)
@@ -490,8 +586,9 @@ def test_series_trailing_affine() -> None:
     w1 = translation_warp(hard_geometry(), (0.8, -0.5, 0.6))
     a2 = vx.affine.compose_affine(translation=(2.0, -1.0, 0.5), rotation=(4, 2, -3))
 
-    # a trailing affine only moves the output domain of the warped result
+    # a trailing affine only moves the output domain of the warped result, the
+    # condensed warp carrying its coordinates through the move
     sequential = w1.map(volume).transform(a2)
     direct = volume.transform(vx.TransformSeries([w1, a2]))
-    assert torch.equal(direct.tensor, sequential.tensor)
+    assert torch.allclose(direct.tensor, sequential.tensor, atol=1e-5)
     assert vx.geometries_equal(direct.geometry, sequential.geometry, tol=1e-4)

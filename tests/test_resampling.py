@@ -193,3 +193,32 @@ def test_triton_no_shape_recompile() -> None:
         source = torch.rand(*shape, device='cuda')
         vx.resampling._resample_triton(source, outshape, _voxel_to_voxel(shape[1:], outshape), **args)
     assert compiled() == count
+
+
+@pytest.mark.parametrize('lead', [(), (10,), (4, 5), (3, 4, 5), (2, 3, 4, 5)])
+def test_sample_tensor(lead) -> None:
+    torch.manual_seed(0)
+    tensor = torch.rand(2, 5, 6, 7)
+    local = torch.rand(*lead, 3) * 2.4 - 1.2
+
+    # the sampler agrees with grid_sample under voxel's convention for any leading shape
+    sampled = vx.resampling.sample_tensor(tensor, local)
+    assert sampled.shape == (2, *lead)
+    reference = torch.nn.functional.grid_sample(
+        tensor.unsqueeze(0), local.reshape(1, -1, 1, 1, 3), mode='bilinear',
+        padding_mode='zeros', align_corners=False).reshape(2, *lead)
+    assert torch.allclose(sampled, reference)
+
+    # and with Volume.sample, which is built on it
+    volume = vx.Volume(tensor)
+    assert torch.allclose(volume.sample(local, space='local'), sampled.movedim(0, -1))
+
+
+def test_sample_tensor_nearest_and_integer_input() -> None:
+    tensor = torch.arange(2 * 3 * 4 * 5).reshape(2, 3, 4, 5)
+    local = vx.AcquisitionGeometry(tensor.shape[1:]).grid('local')
+
+    # sampling an integer tensor at its own grid reproduces it, as floats
+    sampled = vx.resampling.sample_tensor(tensor, local, mode='nearest')
+    assert sampled.dtype == torch.float32
+    assert torch.equal(sampled, tensor.float())

@@ -371,3 +371,15 @@ def test_variadic_components(geometry) -> None:
         geometry.pad(1, 2, 3)
     with pytest.raises(TypeError):
         geometry.shift(1, 2, 3, 'voxel', space='world')
+
+
+def test_grid(geometry) -> None:
+    voxel = geometry.grid('voxel')
+    assert voxel.shape == (*geometry.baseshape, 3)
+    assert torch.equal(voxel, vx.volume.volume_grid(geometry.baseshape))
+    assert torch.allclose(geometry.grid('world'), geometry.map(voxel))
+    assert torch.allclose(geometry.grid('local'), geometry.voxel_to_local_coordinates(voxel))
+
+    # the corners of the local grid sit half a voxel inside [-1, 1]
+    local = geometry.grid('local')
+    assert torch.allclose(local[0, 0, 0], -1 + 1 / torch.tensor(geometry.baseshape).flip(0))

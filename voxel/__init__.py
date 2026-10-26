@@ -39,6 +39,7 @@ from . import warp
 from .warp import Warp
 from .warp import VectorField
 from .warp import VectorFieldPair
+from .warp import compose_vector_fields
 
 from . import transform
 from .transform import TransformSeries
@@ -61,8 +62,10 @@ from .io.volume import save_volume
 from .io.volume import load_geometry
 from .io.mesh import load_mesh
 from .io.mesh import save_mesh
-from .io.affine import load_affine
-from .io.affine import save_affine
+from .io.transform import load_transform
+from .io.transform import save_transform
+from .io.transform import load_affine
+from .io.transform import save_affine
 from .io.labels import load_labels
 from .io.labels import save_labels
 

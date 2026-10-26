@@ -1,7 +1,8 @@
 """
-Grid-free volume resampling. A Triton kernel maps each output voxel through a
-voxel-to-voxel matrix and interpolates the source in a single pass, so no coordinate
-grid is ever materialized.
+Tensor-level sampling and resampling. `sample_tensor` fixes the local grid sampling
+convention in one place, and `resample_tensor` resamples grid-free: a Triton kernel maps
+each output voxel through a voxel-to-voxel matrix and interpolates the source in a single
+pass, so no coordinate grid is ever materialized.
 """
 
 from __future__ import annotations
@@ -17,6 +18,48 @@ except ImportError:
     triton = None
 
 _INTERPRET = os.environ.get('TRITON_INTERPRET') == '1'
+
+
+def sample_tensor(
+    tensor: torch.Tensor,
+    local: torch.Tensor,
+    mode: str = 'linear',
+    padding_mode: str = 'zeros') -> torch.Tensor:
+    """
+    Sample a $(C, W, H, D)$ tensor at points given in the flipped [-1, 1] local
+    coordinates of torch grid sampling (`align_corners=False`). This is the one place
+    that fixes voxel's sampling convention. Floating-point inputs on one device are
+    passed to the sampler without copies or host syncs, so the function suits hot
+    optimization loops.
+
+    Args:
+        tensor (Tensor): Source features of shape $(C, W, H, D)$.
+        local (Tensor): Local sampling coordinates of shape $(..., 3)$, e.g. from
+            `AcquisitionGeometry.grid('local')` or `local_coordinate_transform`.
+        mode (str, optional): Interpolation mode, 'linear' or 'nearest'.
+        padding_mode (str, optional): Out-of-bounds handling, 'zeros', 'border'
+            or 'reflection'.
+
+    Returns:
+        Tensor: Sampled floating-point features of shape $(C, ...)$, keeping the
+            leading shape of the points.
+    """
+    if not tensor.is_floating_point():
+        tensor = tensor.float()
+
+    # up to 3 leading point dims are sampled in their natural shape, avoiding a
+    # flattening round trip; higher-dim point sets fall back to flat
+    lead = local.shape[:-1]
+    points = local.reshape(-1, 3) if len(lead) > 3 else local
+    grid = points.reshape(1, *points.shape[:-1], *([1] * (3 - (points.ndim - 1))), 3)
+
+    sampled = torch.nn.functional.grid_sample(
+        tensor.unsqueeze(0),
+        grid.to(tensor.dtype),
+        mode=('bilinear' if mode == 'linear' else mode),
+        padding_mode=padding_mode,
+        align_corners=False)
+    return sampled.squeeze(0).reshape(tensor.shape[0], *lead)
 
 
 def resample_tensor(
@@ -56,12 +99,7 @@ def _resample_torch(tensor, baseshape, matrix, mode, padding_mode, fill):
     if fill_out_of_bounds:
         padding_mode = 'border'
 
-    resampled = torch.nn.functional.grid_sample(
-                    input=tensor.float().unsqueeze(0),
-                    grid=grid.unsqueeze(0),
-                    mode=('bilinear' if mode == 'linear' else mode),
-                    padding_mode=padding_mode,
-                    align_corners=False).squeeze(0)
+    resampled = sample_tensor(tensor.float(), grid, mode=mode, padding_mode=padding_mode)
 
     if fill_out_of_bounds:
         out_of_bounds = (grid < -1).any(-1) | (grid > 1).any(-1)

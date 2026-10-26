@@ -167,3 +167,58 @@ def test_variadic_components() -> None:
                             vx.filters.gaussian_filter(volume, (1, 1, 2), 'voxel'))
     assert vx.volumes_equal(vx.filters.box_filter(volume, 3, 3, 1, 'voxel'),
                             vx.filters.box_filter(volume, (3, 3, 1), space='voxel'))
+
+
+def test_box_kernel_sizes() -> None:
+    shape = torch.Size((11, 1, 15))
+    assert vx.filters.box_kernel_sizes(3, shape) == (3, 1, 3)
+    assert vx.filters.box_kernel_sizes(torch.tensor([4.0, 5.0, 2.0]), shape) == (5, 1, 1)
+    assert all(isinstance(k, int) for k in vx.filters.box_kernel_sizes(7, shape))
+
+
+def test_box_coverage() -> None:
+    coverage = vx.filters.box_coverage((3, 1, 3), torch.Size((5, 1, 4)))
+    assert coverage.shape == (1, 5, 1, 4)
+    axis0 = torch.tensor([2 / 3, 1, 1, 1, 2 / 3])
+    axis2 = torch.tensor([2 / 3, 1, 1, 2 / 3])
+    assert torch.allclose(coverage[0, :, 0, :], axis0[:, None] * axis2[None, :])
+
+
+def test_box_filter_tensor_matches_filter_tensor() -> None:
+    torch.manual_seed(0)
+    tensor = torch.rand(2, 7, 8, 9)
+    sizes = (3, 5, 1)
+    kernels = [torch.ones(k) / k for k in sizes]
+    expected = vx.filters.filter_tensor(tensor, kernels, padding_mode='zeros')
+    assert torch.allclose(vx.filters.box_filter_tensor(tensor, sizes), expected, atol=1e-6)
+
+
+def test_box_filter_tensor_gradient() -> None:
+    torch.manual_seed(0)
+    tensor = torch.rand(1, 5, 6, 4, dtype=torch.float64, requires_grad=True)
+    sizes = (3, 3, 1)
+    assert torch.autograd.gradcheck(lambda x: vx.filters.box_filter_tensor(x, sizes), (tensor,))
+
+    # the explicit backward agrees with autograd through the plain convolution
+    weights = torch.rand(1, 5, 6, 4, dtype=torch.float64)
+    kernels = [torch.ones(k, dtype=torch.float64) / k for k in sizes]
+    explicit, = torch.autograd.grad((vx.filters.box_filter_tensor(tensor, sizes) * weights).sum(), tensor)
+    reference, = torch.autograd.grad((vx.filters.filter_tensor(tensor, kernels, padding_mode='zeros') * weights).sum(), tensor)
+    assert torch.allclose(explicit, reference)
+
+
+def test_box_coverage_normalizes_border_means() -> None:
+    torch.manual_seed(0)
+    tensor = torch.rand(1, 6, 7, 8)
+    sizes = (3, 3, 3)
+    mean = vx.filters.box_filter_tensor(tensor, sizes) / vx.filters.box_coverage(sizes, tensor.shape[1:])
+
+    # at a corner, the normalized mean is the mean of the in-bounds voxels only
+    assert torch.allclose(mean[0, 0, 0, 0], tensor[0, :2, :2, :2].mean(), atol=1e-6)
+    assert torch.allclose(mean[0, 3, 3, 3], tensor[0, 2:5, 2:5, 2:5].mean(), atol=1e-6)
+
+
+def test_filter_tensor_identity_kernels() -> None:
+    tensor = torch.rand(2, 4, 5, 6)
+    kernels = [torch.ones(1), torch.ones(1), torch.ones(1)]
+    assert torch.equal(vx.filters.filter_tensor(tensor, kernels), tensor)

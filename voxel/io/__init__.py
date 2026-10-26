@@ -3,5 +3,5 @@ from .utility import numpy_to_tensor
 
 from . import volume
 from . import mesh
-from . import affine
+from . import transform
 from . import labels

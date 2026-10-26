@@ -4,6 +4,7 @@ Dense deformation structures for warping volumes and integrating flow fields.
 
 from __future__ import annotations
 
+import os
 import dataclasses
 import torch
 import voxel as vx
@@ -38,6 +39,26 @@ class VectorField(vx.Volume):
             raise ValueError("vector field requires a vector value space, either 'world' or 'voxel'")
         super().__init__(tensor, geometry)
         self.space = vx.Space(space)
+
+    def save(self, filename: os.PathLike, fmt: str | None = None) -> None:
+        """
+        Save the vector field to a file. A transform file keeps the vector space,
+        a volume format writes the vectors as a 3-channel volume.
+
+        Args:
+            filename (PathLike): The path to the file to save.
+            fmt (str, optional): The format of the file. If None, the format is
+                determined by the file extension.
+        """
+        protocols = vx.io.transform.transform_io_protocols
+        if fmt is None:
+            proto = vx.io.utility.find_protocol_by_extension(protocols, filename)
+        else:
+            proto = vx.io.utility.find_protocol_by_name(protocols, fmt)
+        if proto is None:
+            super().save(filename, fmt=fmt)
+        else:
+            vx.save_transform(self, filename, fmt=fmt)
 
     def new(self,
         tensor: torch.Tensor,
@@ -86,6 +107,43 @@ class VectorField(vx.Volume):
         vectors = torch.einsum('ij,jwhd->iwhd', linear, self.tensor.to(dtype))
         return VectorField(vectors, self.geometry, space=space)
 
+    def transform(self,
+        transform: vx.AnyTransform,
+        mode: str = 'linear',
+        padding_mode: str = 'zeros',
+        like: vx.Volume | vx.AcquisitionGeometry | None = None) -> VectorField | vx.Volume:
+        """
+        Apply a spatial transform to the field. An affine matrix moves the field along
+        with the anatomy it deforms: the grid moves and the vectors turn and scale with
+        it, so a world-space field is conjugated by the affine while a voxel-space field
+        keeps its values. Warps, fields, series, and `like` behave as for any volume.
+
+        Args:
+            transform (AnyTransform): Transform to apply.
+            mode (str, optional): Interpolation mode when resampling.
+            padding_mode (str, optional): Padding mode for outside grid values
+                when resampling.
+            like (Volume or AcquisitionGeometry, optional): Geometry the result is
+                resampled onto.
+
+        Returns:
+            VectorField: Transformed field.
+        """
+        if isinstance(transform, vx.TransformSeries):
+            transform = transform.condense()
+            if isinstance(transform, vx.TransformSeries):
+                affine, deformation = transform
+                return self.transform(affine).transform(deformation, mode=mode, padding_mode=padding_mode, like=like)
+        if isinstance(transform, (VectorFieldPair, VectorField, Warp)):
+            return super().transform(transform, mode=mode, padding_mode=padding_mode, like=like)
+        field = self.in_space('voxel')
+        moved = field.new(field.tensor, vx.AffineMatrix(transform) @ field.geometry)
+        if like is None:
+            return moved.in_space(self.space)
+        # world vectors survive a change of grid, voxel vectors are relative to it
+        resampled = moved.in_space('world').resample_like(like, mode=mode, padding_mode=padding_mode)
+        return resampled.in_space(self.space)
+
     def as_warp(self, geometry: vx.AcquisitionGeometry = None) -> Warp:
         """
         Convert to an absolute world-space coordinate warp, built as the
@@ -101,9 +159,9 @@ class VectorField(vx.Volume):
         """
         field = self.in_space('world')
         if geometry is None:
-            grid = self.geometry.map(vx.volume.volume_grid(self.baseshape, device=self.device))
+            grid = self.geometry.grid('world', device=self.device)
             return Warp(grid + field.tensor.permute(1, 2, 3, 0), self.geometry)
-        grid = geometry.map(vx.volume.volume_grid(geometry.baseshape, device=self.device))
+        grid = geometry.grid('world', device=self.device)
         return Warp(grid + field.sample(grid, space='world'), geometry)
 
     def integrate(self, coordinates: torch.Tensor, dt: float, method: str = 'euler',
@@ -176,8 +234,7 @@ class VectorField(vx.Volume):
         # run the scaling and squaring entirely in the local sampling space
         # (see integrate), converting the displacements back at the end
         linear = self.geometry.local_coordinate_transform(self.space, dtype=dtype)[:3, :3]
-        grid = vx.volume.volume_grid(self.baseshape, localshape=self.baseshape,
-                                     device=self.device).to(dtype)
+        grid = self.geometry.grid('local', device=self.device).to(dtype)
         scaled = torch.einsum('ij,jwhd->iwhd', linear, self.tensor.to(dtype)) / (2 ** steps)
         vectors = scaled.permute(1, 2, 3, 0)
         for _ in range(steps):
@@ -185,6 +242,30 @@ class VectorField(vx.Volume):
             vectors = vectors + current.sample(grid + vectors, space='local')
         vectors = vectors @ torch.inverse(linear).T
         return VectorField(vectors.permute(3, 0, 1, 2), self.geometry, space=self.space)
+
+
+def compose_vector_fields(first: VectorField, second: VectorField) -> VectorField:
+    """
+    Compose two displacement fields into the single field of applying `first` and
+    then `second`, matching the order of a `TransformSeries`. The result lives on the
+    grid of `second`, in pull-back form: a grid point is displaced by `second` and
+    then by `first` sampled at the displaced position, $d(x) = s(x) + f(x + s(x))$.
+    Points beyond the extent of `first` see no displacement from it.
+
+    Args:
+        first (VectorField): Displacement field applied first.
+        second (VectorField): Displacement field applied second, defining the grid
+            and the vector space of the result.
+
+    Returns:
+        VectorField: The composed displacement field.
+    """
+    world = second.in_space('world')
+    grid = world.geometry.grid('world', device=world.device)
+    vectors = world.tensor.permute(1, 2, 3, 0)
+    vectors = vectors + first.in_space('world').sample(grid + vectors, space='world')
+    composed = VectorField(vectors.permute(3, 0, 1, 2), world.geometry, space='world')
+    return composed.in_space(second.space)
 
 
 class Warp:
@@ -233,6 +314,17 @@ class Warp:
         """
         return Warp(self.coordinates.to(device), self.geometry)
 
+    def save(self, filename: os.PathLike, fmt: str | None = None) -> None:
+        """
+        Save the warp to a file.
+
+        Args:
+            filename (PathLike): The path to the file to save.
+            fmt (str, optional): The format of the file. If None, the format is
+                determined by the file extension.
+        """
+        vx.save_transform(self, filename, fmt=fmt)
+
     def as_volume(self) -> vx.Volume:
         """
         Convert the warp to a volume of 3-channel coordinate features.
@@ -250,7 +342,7 @@ class Warp:
         Returns:
             VectorField: The displacement field.
         """
-        grid = self.geometry.map(vx.volume.volume_grid(self.baseshape, device=self.device))
+        grid = self.geometry.grid('world', device=self.device)
         vectors = (self.coordinates - grid).permute(3, 0, 1, 2)
         return VectorField(vectors, geometry=self.geometry, space='world')
 
@@ -282,6 +374,17 @@ class VectorFieldPair:
 
     def inverse(self) -> VectorFieldPair:
         return VectorFieldPair(self.reverse, self.forward)
+
+    def save(self, filename: os.PathLike, fmt: str | None = None) -> None:
+        """
+        Save the field pair to a file.
+
+        Args:
+            filename (PathLike): The path to the file to save.
+            fmt (str, optional): The format of the file. If None, the format is
+                determined by the file extension.
+        """
+        vx.save_transform(self, filename, fmt=fmt)
 
     def to(self, device: torch.device) -> VectorFieldPair:
         return VectorFieldPair(self.forward.to(device), self.reverse.to(device))

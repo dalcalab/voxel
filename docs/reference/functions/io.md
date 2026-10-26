@@ -8,6 +8,10 @@
 
 ::: voxel.save_mesh
 
+::: voxel.load_transform
+
+::: voxel.save_transform
+
 ::: voxel.load_affine
 
 ::: voxel.save_affine

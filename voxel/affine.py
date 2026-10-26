@@ -47,7 +47,7 @@ class AffineMatrix:
             data = torch.cat((data, row), dim=1)
 
         if data.shape == (3, 4):
-            row = _bottom_row(data.dtype, data.device)
+            row = bottom_row(data.dtype, data.device)
             data = torch.cat((data, row), dim=0)
         elif data.shape != (4, 4):
             raise ValueError('Input matrix must be 3x3, 3x4, or 4x4.')
@@ -76,12 +76,12 @@ class AffineMatrix:
     def __matmul__(self, rhs: AffineMatrix | torch.Tensor) -> AffineMatrix | torch.Tensor:
         rhs = rhs.tensor if isinstance(rhs, AffineMatrix) else rhs
         result = self.tensor @ rhs.type(self.tensor.dtype)
-        return AffineMatrix(result) if result.shape == (4, 4) else result
+        return AffineMatrix(result, dtype=result.dtype) if result.shape == (4, 4) else result
 
     def __rmatmul__(self, lhs: AffineMatrix | torch.Tensor) -> AffineMatrix | torch.Tensor:
         lhs = lhs.tensor if isinstance(lhs, AffineMatrix) else lhs
         result = lhs.type(self.tensor.dtype) @ self.tensor
-        return AffineMatrix(result) if result.shape == (4, 4) else result
+        return AffineMatrix(result, dtype=result.dtype) if result.shape == (4, 4) else result
 
     def _from_tensor_with_new_properties(self: T, tensor: torch.Tensor) -> T:
         """
@@ -90,7 +90,7 @@ class AffineMatrix:
         for subclasses. This function should be called in scenarios only when the
         matrix has new properties (e.g. device or data type), not new values.
         """
-        return self.__class__(tensor)
+        return self.__class__(tensor, dtype=tensor.dtype)
 
     def save(self, filename: os.PathLike, fmt: str | None = None) -> None:
         """
@@ -144,12 +144,23 @@ class AffineMatrix:
 
     def inverse(self) -> AffineMatrix:
         """
-        Invert the matrix.
+        Invert the matrix. The inverse is computed in closed form through the 3x3
+        cofactors, so it never syncs with the host and can run inside a CUDA graph.
 
         Returns:
             AffineMatrix: Inverted affine matrix.
         """
-        return AffineMatrix(self.tensor.inverse(), dtype=self.tensor.dtype)
+        matrix = self.tensor
+        linear, translation = matrix[:3, :3], matrix[:3, 3]
+        cofactors = torch.stack([
+            torch.linalg.cross(linear[1], linear[2]),
+            torch.linalg.cross(linear[2], linear[0]),
+            torch.linalg.cross(linear[0], linear[1])], dim=1)
+        det = (linear[0] * cofactors[:, 0]).sum()
+        inverse = cofactors / det
+        top = torch.cat([inverse, (-inverse @ translation).unsqueeze(1)], dim=1)
+        bottom = bottom_row(matrix.dtype, matrix.device)
+        return AffineMatrix(torch.cat([top, bottom], dim=0), dtype=matrix.dtype)
 
     def map(self, coords: torch.Tensor) -> torch.Tensor:
         """
@@ -181,10 +192,20 @@ class AffineMatrix:
 
 
 @functools.lru_cache
-def _bottom_row(dtype: torch.dtype, device: torch.device) -> torch.Tensor:
-    # the homogeneous [0, 0, 0, 1] row as a device-resident constant. building it per call
-    # is a host-to-device copy that syncs the stream and cannot be captured in a cuda graph,
-    # and hot optimization loops assemble matrices every iteration
+def bottom_row(dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """
+    The homogeneous [0, 0, 0, 1] row of an affine matrix as a cached, device-resident
+    constant of shape (1, 4). Building it per call is a host-to-device copy that syncs
+    the stream and cannot be captured in a CUDA graph, and hot optimization loops
+    assemble matrices every iteration.
+
+    Args:
+        dtype (dtype): Data type of the row.
+        device (device): Device of the row.
+
+    Returns:
+        Tensor: The bottom row.
+    """
     return torch.tensor([[0, 0, 0, 1]], dtype=dtype, device=device)
 
 
@@ -331,7 +352,7 @@ def compose_affine(
 
     zero = torch.zeros((), dtype=torch.float64, device=device)
     one = torch.ones((), dtype=torch.float64, device=device)
-    bottom = _bottom_row(torch.float64, device)
+    bottom = bottom_row(torch.float64, device)
 
     def homogeneous(linear: torch.Tensor, trans: torch.Tensor) -> torch.Tensor:
         # assemble a 4x4 matrix from a 3x3 linear block and a translation vector

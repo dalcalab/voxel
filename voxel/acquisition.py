@@ -197,6 +197,25 @@ class AcquisitionGeometry(vx.AffineMatrix):
         """
         return self.map((torch.tensor(self.baseshape, device=self.device) - 1) / 2)
 
+    def grid(self, space: vx.Space, device: torch.device | None = None) -> torch.Tensor:
+        """
+        Coordinates of every voxel of the acquisition grid in a coordinate space.
+
+        Args:
+            space (Space): Coordinate space of the points: 'voxel', 'world', or the
+                flipped [-1, 1] 'local' space used by torch grid sampling.
+            device (device, optional): Device of the grid. Defaults to the geometry's.
+
+        Returns:
+            Tensor: Float coordinates of shape $(W, H, D, 3)$.
+        """
+        space = vx.Space(space)
+        device = self.device if device is None else device
+        if space == 'local':
+            return vx.volume.volume_grid(self.baseshape, localshape=self.baseshape, device=device)
+        grid = vx.volume.volume_grid(self.baseshape, device=device)
+        return self.map(grid) if space == 'world' else grid
+
     def local_coordinate_transform(self,
         space: vx.Space = 'voxel',
         dtype: torch.dtype = torch.float32) -> vx.AffineMatrix:

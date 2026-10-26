@@ -103,3 +103,16 @@ moved_mesh = mesh.transform(aff)
 moved_box = box.transform(aff)
 moved_pts = aff.map(pts)
 ```
+
+## Saving and loading
+
+Any transform saves to voxel's own `.vxx` format, and `load_transform` reads it back as the bare transform, or as a `TransformSeries` when the file holds several steps, written in application order and never condensed. The file is a plain zip holding a JSON manifest and one `.npy` array per tensor, so any zip and npy reader opens it without torch. Affines also read and write plain whitespace text (`.txt`, `.mat`), four rows of four numbers.
+
+```python
+series = vx.TransformSeries([aff, field])
+series.save('moving_to_fixed.vxx')
+transform = vx.load_transform('moving_to_fixed.vxx')
+aff.save('affine.txt')
+```
+
+A `VectorField` saved to a volume format writes its vectors as a 3-channel volume and loses the vector space, so prefer `.vxx` for a field meant to be applied again.

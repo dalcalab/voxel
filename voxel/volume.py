@@ -902,37 +902,20 @@ class Volume:
         if isinstance(points, vx.Mesh):
             points = points.vertices
 
-        # original leading shape
-        inshape = points.shape[:-1]
-
         # convert to the local grid sampling space (broadcasts over any leading dims)
         space = vx.Space(space)
         if space != 'local':
             dtype = points.dtype if points.is_floating_point() else torch.float32
             points = self.geometry.local_coordinate_transform(space, dtype=dtype).map(points)
 
-        # point grids of up to 3 leading dims are sampled in their natural shape,
-        # avoiding a flattening round trip; higher-dim point sets fall back to flat
-        if len(inshape) > 3:
-            points = points.reshape(-1, 3)
-        grid = points.reshape(1, *points.shape[:-1], *([1] * (3 - (points.ndim - 1))), 3)
-
-        # sample the channels, ensuring a floating-point dtype without
-        # downcasting volumes of higher precision
-        tensor = self.tensor if self.tensor.is_floating_point() else self.tensor.float()
-        sampled = torch.nn.functional.grid_sample(
-            tensor.unsqueeze(0),
-            grid.to(tensor.dtype),
-            align_corners=False,
-            mode=('bilinear' if mode == 'linear' else 'nearest'),
-            padding_mode=padding_mode)
+        sampled = vx.resampling.sample_tensor(self.tensor, points, mode=mode, padding_mode=padding_mode)
 
         # if nearest neighbor sampling, convert back to original dtype
         if mode == 'nearest':
             sampled = sampled.type(self.dtype)
 
-        # remove the batch dim, move channels last, and restore the input shape
-        return sampled.squeeze(0).movedim(0, -1).reshape(*inshape, sampled.size(1))
+        # move the channels last
+        return sampled.movedim(0, -1)
 
     def tesselate(self, threshold: float = 0.5, space: vx.Space = 'world') -> vx.Mesh:
         """
@@ -1310,7 +1293,7 @@ class Volume:
 
         if antialias:
             kernels = [vx.filters.gaussian_kernel_1d(float(s), truncate, device=resampled.device) for s in sigma]
-            resampled = vx.filters._filter_tensor(resampled, kernels, stride=tuple(down_factor),
+            resampled = vx.filters.filter_tensor(resampled, kernels, stride=tuple(down_factor),
                                                   padding='valid')
 
         # probably ideal to keep the data type consistent when using nearest neighbor sampling
@@ -1440,43 +1423,55 @@ class Volume:
     def transform(self,
         transform: vx.AnyTransform,
         mode: str = 'linear',
-        padding_mode: str = 'zeros') -> Volume:
+        padding_mode: str = 'zeros',
+        like: Volume | vx.AcquisitionGeometry | None = None) -> Volume:
         """
         Apply a spatial transform to the volume. Affine matrices are world-space
-        transforms and only move the acquisition geometry, never the image data
-        (resample afterwards, e.g. with `resample_like`, if a fixed grid is
-        needed). Warps resample the data and pin the result to the warp grid. A
-        displacement field (or the forward field of a pair) is applied as a warp
-        on this volume's own grid, so the result keeps its geometry (the field
-        is sampled there, with zero displacement beyond its extent). A transform
-        series is applied step by step, in order, with no composition.
+        transforms and only move the acquisition geometry, never the image data.
+        Warps resample the data and pin the result to the warp grid. A displacement
+        field (or the forward field of a pair) is applied as a warp on this volume's
+        own grid, so the result keeps its geometry (the field is sampled there, with
+        zero displacement beyond its extent). A transform series is condensed first,
+        to at most one affine followed by one deformation, so the data is interpolated
+        once. With `like`, the result is resampled onto that geometry instead, still
+        with a single interpolation: an affine result is resampled after the move,
+        and a deformation is sampled on that grid.
 
         Args:
             transform (AnyTransform): Transform to apply.
-            mode (str, optional): Interpolation mode when resampling through a warp.
+            mode (str, optional): Interpolation mode when resampling.
             padding_mode (str, optional): Padding mode for outside grid values
-                when resampling through a warp.
+                when resampling.
+            like (Volume or AcquisitionGeometry, optional): Geometry the result is
+                resampled onto. By default an affine moves the geometry, a field keeps
+                it, and a warp imposes its own.
 
         Returns:
             Volume: Transformed volume.
         """
         if isinstance(transform, vx.TransformSeries):
-            volume = self
-            for step in transform:
-                volume = volume.transform(step, mode=mode, padding_mode=padding_mode)
-            return volume
+            transform = transform.condense()
+            if isinstance(transform, vx.TransformSeries):
+                # the affine moves the geometry, then the deformation resamples
+                affine, deformation = transform
+                return self.transform(affine).transform(deformation, mode=mode, padding_mode=padding_mode, like=like)
 
+        if like is not None:
+            like = vx.cast_acquisition_geometry(like)
         if isinstance(transform, vx.VectorFieldPair):
             transform = transform.forward
+        if isinstance(transform, vx.Warp) and like is not None and not vx.geometries_equal(transform.geometry, like):
+            # expressed on the requested grid, as the identity beyond the warp's extent
+            transform = transform.as_displacement_field()
         if isinstance(transform, vx.VectorField):
-            # sampled on this volume's own grid, so the result keeps its geometry
-            transform = transform.as_warp(self.geometry)
+            transform = transform.as_warp(self.geometry if like is None else like)
         if isinstance(transform, vx.Warp):
             return transform.map(self, mode=mode, padding_mode=padding_mode)
 
         if not isinstance(transform, vx.AffineMatrix):
             transform = vx.AffineMatrix(transform)
-        return self.new(self.tensor, transform @ self.geometry)
+        moved = self.new(self.tensor, transform @ self.geometry)
+        return moved if like is None else moved.resample_like(like, mode=mode, padding_mode=padding_mode)
 
     def pool(self,
         scale: int = 2,

@@ -136,11 +136,10 @@ def apply_filter(
     kernel_size = list(kernels[0].shape) if len(kernels) == 1 else [k.numel() for k in kernels]
 
     # skip the convolution entirely for an identity kernel
-    if all(s == 1 for s in stride) and all(k.numel() == 1 for k in kernels) and \
-       all(float(k.flatten()[0]) == 1 for k in kernels):
+    if all(s == 1 for s in stride) and all(k.numel() == 1 for k in kernels):
         return volume
 
-    result = _filter_tensor(volume.tensor, kernel, stride=stride, padding_mode=padding_mode)
+    result = filter_tensor(volume.tensor, kernel, stride=stride, padding_mode=padding_mode)
 
     # unstrided, odd-sized kernels preserve the grid and therefore the geometry
     if all(s == 1 for s in stride) and all(k % 2 == 1 for k in kernel_size):
@@ -155,7 +154,7 @@ def apply_filter(
     return volume.new(result, geometry)
 
 
-def _filter_tensor(
+def filter_tensor(
     tensor: torch.Tensor,
     kernel: torch.Tensor | list,
     stride: int | torch.Tensor = 1,
@@ -166,7 +165,9 @@ def _filter_tensor(
     sequence of three separable 1D kernels.
 
     Padding is applied to the input once up front, so separable and dense
-    filtering remain numerically equivalent for any padding mode.
+    filtering remain numerically equivalent for any padding mode. A length-1
+    separable kernel is an identity tap and is skipped without reading its value,
+    so prebuilt kernels can live on any device without a host sync.
 
     Args:
         kernel (Tensor or list): A single dense 3D kernel of shape $(W, H, D)$
@@ -215,8 +216,8 @@ def _filter_tensor(
         result = conv(result, weight, groups=channels, stride=stride, padding=conv_pads)
     else:
         for dim, k in enumerate(kernels):
-            # a single-element unit kernel with no stride is an identity
-            if k.numel() == 1 and stride[dim] == 1 and float(k[0]) == 1:
+            # a single-element kernel with no stride is an identity
+            if k.numel() == 1 and stride[dim] == 1:
                 continue
             shape = [k.numel() if d == dim else 1 for d in range(3)]
             weight = k.to(result.dtype).view(1, 1, *shape).expand(channels, 1, *shape)
@@ -224,6 +225,104 @@ def _filter_tensor(
             dim_pad = [conv_pads[d] if d == dim else 0 for d in range(3)]
             result = conv(result, weight, groups=channels, stride=dim_stride, padding=dim_pad)
 
+    return result.squeeze(0)
+
+
+def box_kernel_sizes(size: float | torch.Tensor, shape: torch.Size) -> tuple:
+    """
+    Voxel extents of a box kernel, as python integers: the requested extents rounded
+    to the nearest odd number, and 1 along singleton dimensions, which are never filtered.
+
+    Args:
+        size (float or Tensor): Box extent(s) in voxels, one value or one per dimension.
+        shape (Size): Spatial shape of the tensor to filter.
+
+    Returns:
+        tuple: Three odd integer kernel sizes.
+    """
+    size = torch.as_tensor(size, dtype=torch.float32)
+    size = size.repeat(3) if size.ndim == 0 else size
+    kernel_size = (torch.round((size - 1) / 2) * 2 + 1).int().clamp(min=1)
+    return tuple(1 if s == 1 else int(k) for k, s in zip(kernel_size, shape))
+
+
+def box_filter_tensor(tensor: torch.Tensor, sizes: tuple) -> torch.Tensor:
+    """
+    Separable zero-padded box mean of a channeled $(C, W, H, D)$ tensor, for use in
+    hot, differentiable, or compiled code. The kernel sizes are python integers, so no
+    kernel tensors are built or inspected and the call never syncs with the host. The
+    backward pass is the same filter (an odd zero-padded box filter is self-adjoint),
+    which keeps the convolution backward out of compiled graphs, where its lowering
+    specializes on the spatial size and recompiles per shape.
+
+    Near the borders the mean includes the zero padding. Divide by `box_coverage`
+    to average over the in-bounds voxels only.
+
+    Args:
+        tensor (Tensor): Input tensor of shape $(C, W, H, D)$.
+        sizes (tuple): Three odd integer kernel sizes, e.g. from `box_kernel_sizes`.
+
+    Returns:
+        Tensor: Filtered tensor of the input shape and dtype.
+    """
+    return _BoxFilter.apply(tensor, tuple(int(k) for k in sizes))
+
+
+def box_coverage(
+    sizes: tuple,
+    shape: torch.Size,
+    device: torch.device | None = None) -> torch.Tensor:
+    """
+    Fraction of a zero-padded box window that falls in bounds at every voxel, i.e. the
+    box mean of a volume of ones. Dividing a zero-padded box mean by it turns the mean
+    into one over the in-bounds voxels only, which keeps windowed statistics correct at
+    the borders. Odd kernels always keep the center tap in bounds, so no value is zero.
+
+    Args:
+        sizes (tuple): Three odd integer kernel sizes, e.g. from `box_kernel_sizes`.
+        shape (Size): Spatial shape of the tensor to filter.
+        device (device, optional): Device of the coverage tensor.
+
+    Returns:
+        Tensor: Coverage of shape $(1, W, H, D)$.
+    """
+    axes = []
+    for k, extent in zip(sizes, shape):
+        ones = torch.ones(1, 1, extent, device=device)
+        kernel = torch.ones(1, 1, int(k), device=device) / int(k)
+        axes.append(torch.nn.functional.conv1d(ones, kernel, padding='same').view(-1))
+    return (axes[0][:, None, None] * axes[1][None, :, None] * axes[2][None, None, :]).unsqueeze(0)
+
+
+class _BoxFilter(torch.autograd.Function):
+    """
+    The zero-padded box mean with its backward spelled out as the same filter.
+    """
+
+    @staticmethod
+    def forward(ctx, tensor: torch.Tensor, sizes: tuple) -> torch.Tensor:
+        ctx.sizes = sizes
+        return _box_conv(tensor, sizes)
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor) -> tuple:
+        return _box_conv(grad, ctx.sizes), None
+
+
+def _box_conv(tensor: torch.Tensor, sizes: tuple) -> torch.Tensor:
+    """
+    Separable zero-padded box mean with python kernel sizes and conv-side padding.
+    """
+    channels = tensor.shape[0]
+    result = tensor.unsqueeze(0)
+    for dim, k in enumerate(sizes):
+        if k == 1:
+            continue
+        shape = [k if d == dim else 1 for d in range(3)]
+        weight = torch.full((channels, 1, *shape), 1 / k, dtype=result.dtype, device=result.device)
+        result = torch.nn.functional.conv3d(
+            result, weight, groups=channels,
+            padding=[(k - 1) // 2 if d == dim else 0 for d in range(3)])
     return result.squeeze(0)
 
 
@@ -235,14 +334,7 @@ def _box_kernels(
     Build three separable 1D uniform kernels of a given voxel extent, normalized
     so that filtering with them yields a local mean.
     """
-    kernel_size = (torch.round((size - 1) / 2) * 2 + 1).int().clamp(min=1)
-
-    # don't filter dimensions of size 1
-    for i, s in enumerate(shape):
-        if s == 1:
-            kernel_size[i] = 1
-
-    return [torch.ones(int(k), device=device) / int(k) for k in kernel_size]
+    return [torch.ones(k, device=device) / k for k in box_kernel_sizes(size, shape)]
 
 
 def _dense_kernel(kernels: list) -> torch.Tensor:
